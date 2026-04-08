@@ -96,7 +96,14 @@ export default function DrawingCanvas() {
   const [panning, setPanning] = useState<{ startX: number; startY: number; camX: number; camY: number } | null>(null);
   const draggingId = useRef<{ id: string; offX: number; offY: number } | null>(null);
   const lastPushedAt = useRef(0);
+  /** Bumps when local shapes diverge from the last applied server poll — stale polls must not overwrite. */
+  const localGen = useRef(0);
+  const pushing = useRef(false);
   const toast = useToast();
+
+  const bumpGen = useCallback(() => {
+    localGen.current += 1;
+  }, []);
 
   cameraRef.current = camera;
   shapesRef.current = shapes;
@@ -106,30 +113,51 @@ export default function DrawingCanvas() {
   useEffect(() => {
     let mounted = true;
     async function load() {
+      if (pushing.current) return;
+      const gen = localGen.current;
       try {
-        const res = await fetch("/api/drawing");
+        const res = await fetch("/api/drawing", { cache: "no-store" });
         const data = await res.json();
-        if (mounted && Array.isArray(data.shapes)) {
+        if (!mounted) return;
+        if (pushing.current) return;
+        if (localGen.current !== gen) return;
+        if (Array.isArray(data.shapes)) {
           setShapes(data.shapes);
         }
       } catch {}
     }
     load();
     const id = setInterval(load, 3000);
-    return () => { mounted = false; clearInterval(id); };
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
   }, []);
 
-  // Save shapes to server (debounced via lastPushedAt)
-  const pushShapes = useCallback(async (next: Shape[]) => {
-    lastPushedAt.current = Date.now();
-    try {
-      await fetch("/api/drawing", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shapes: next }),
-      });
-    } catch {}
-  }, []);
+  const pushShapes = useCallback(
+    async (next: Shape[]) => {
+      lastPushedAt.current = Date.now();
+      pushing.current = true;
+      try {
+        const res = await fetch("/api/drawing", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shapes: next }),
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          console.error("Drawing PUT failed", res.status, await res.text().catch(() => ""));
+          toast.push("Could not save drawing");
+        }
+      } catch (e) {
+        console.error(e);
+        toast.push("Could not save drawing");
+      } finally {
+        pushing.current = false;
+      }
+    },
+    [toast],
+  );
 
   // Resize canvas to container
   useEffect(() => {
@@ -238,6 +266,7 @@ export default function DrawingCanvas() {
         setHistory((h) => {
           if (!h.length) return h;
           const prev = h[h.length - 1];
+          bumpGen();
           setShapes(prev);
           pushShapes(prev);
           return h.slice(0, -1);
@@ -253,7 +282,7 @@ export default function DrawingCanvas() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [pushShapes]);
+  }, [pushShapes, bumpGen]);
 
   function onPointerDown(e: React.PointerEvent) {
     (e.target as Element).setPointerCapture(e.pointerId);
@@ -270,6 +299,7 @@ export default function DrawingCanvas() {
           const b = shapeBounds(shapes[i]);
           draggingId.current = { id: shapes[i].id, offX: x - b.x, offY: y - b.y };
           pushHistory();
+          bumpGen();
           return;
         }
       }
@@ -280,6 +310,7 @@ export default function DrawingCanvas() {
       for (let i = shapes.length - 1; i >= 0; i--) {
         if (hitTest(shapes[i], x, y)) {
           pushHistory();
+          bumpGen();
           const next = shapes.filter((s) => s.id !== shapes[i].id);
           setShapes(next);
           pushShapes(next);
@@ -344,6 +375,7 @@ export default function DrawingCanvas() {
     }
     if (drawingRef.current) {
       pushHistory();
+      bumpGen();
       const next = [...shapesRef.current, drawingRef.current];
       setShapes(next);
       setDrawing(null);
@@ -367,6 +399,7 @@ export default function DrawingCanvas() {
     if (!textInput) return;
     if (textInput.value.trim()) {
       pushHistory();
+      bumpGen();
       const s: Shape = {
         id: uuid(),
         type: "text",
@@ -378,7 +411,7 @@ export default function DrawingCanvas() {
         strokeWidth,
         text: textInput.value,
       };
-      const next = [...shapes, s];
+      const next = [...shapesRef.current, s];
       setShapes(next);
       pushShapes(next);
     }
@@ -387,6 +420,7 @@ export default function DrawingCanvas() {
 
   function clearAll() {
     pushHistory();
+    bumpGen();
     setShapes([]);
     pushShapes([]);
     setConfirmClear(false);
