@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls s:/projects/letsColab/.env* s:/projects/letsColab/.gitignore)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

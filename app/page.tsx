@@ -12,7 +12,7 @@ export default function GatePage() {
 
   useEffect(() => {
     if (typeof window !== "undefined" && localStorage.getItem("teamhub_auth") === "true") {
-      router.replace("/scrum");
+      router.replace("/dashboard");
     }
   }, [router]);
 
@@ -29,7 +29,7 @@ export default function GatePage() {
       const data = await res.json();
       if (data.success) {
         localStorage.setItem("teamhub_auth", "true");
-        router.replace("/scrum");
+        router.replace("/dashboard");
       } else {
         setError("Incorrect password");
       }

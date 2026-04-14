@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { KanbanIcon, KeyIcon, NoteIcon, PenIcon } from "./icons";
+import { GridIcon, KanbanIcon, KeyIcon, NoteIcon, PenIcon } from "./icons";
 
 const links = [
-  { href: "/scrum", icon: KanbanIcon, label: "Scrum" },
+  { href: "/dashboard", icon: GridIcon, label: "Dashboard" },
+  { href: "/scrum", icon: KanbanIcon, label: "Tasks" },
   { href: "/passwords", icon: KeyIcon, label: "Vault" },
   { href: "/notes", icon: NoteIcon, label: "Notes" },
   { href: "/drawing", icon: PenIcon, label: "Draw" },
