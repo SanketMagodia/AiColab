@@ -145,7 +145,7 @@ export const MoonIcon = ({ size, className }: IconProps) => (
   </svg>
 );
 
-/** Sliders — “style” panel for stroke & color */
+/** Sliders — "style" panel for stroke & color */
 export const SlidersIcon = ({ size, className }: IconProps) => (
   <svg {...base(size)} className={className}>
     <line x1="4" y1="21" x2="4" y2="14" />
@@ -157,5 +157,62 @@ export const SlidersIcon = ({ size, className }: IconProps) => (
     <line x1="1" y1="14" x2="7" y2="14" />
     <line x1="9" y1="8" x2="15" y2="8" />
     <line x1="17" y1="16" x2="23" y2="16" />
+  </svg>
+);
+
+/** Sparkles — AI */
+export const SparklesIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+    <path d="M12 8a4 4 0 0 0 4 4 4 4 0 0 0-4 4 4 4 0 0 0-4-4 4 4 0 0 0 4-4z" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+/** Check circle — task */
+export const CheckCircleIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m8 12 2.5 2.5L16 9" />
+  </svg>
+);
+
+/** Calendar — event */
+export const CalendarIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 10h18" />
+    <path d="M8 3v4M16 3v4" />
+  </svg>
+);
+
+/** Check — accept/add action */
+export const CheckIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+/** X — dismiss */
+export const XIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+/** Wand — analyze action */
+export const WandIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M15 9h0M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5" />
+  </svg>
+);
+
+/** Refresh — re-analyze */
+export const RefreshIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8" />
+    <polyline points="21 3 21 8 16 8" />
+    <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16" />
+    <polyline points="3 21 3 16 8 16" />
   </svg>
 );

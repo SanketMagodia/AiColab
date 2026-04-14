@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AccountInfo } from "@azure/msal-browser";
 import { MS_SCOPES, getMsal, getRedirectResult, graphFetch, graphBlob } from "@/lib/msal";
+import { SparklesIcon, CheckCircleIcon, CalendarIcon, CheckIcon, XIcon, WandIcon, RefreshIcon } from "@/components/layout/icons";
 
 /* ── types ── */
 type Email = {
@@ -79,6 +80,17 @@ export default function DashboardPage() {
   const [dmSending, setDmSending] = useState(false);
   const searchTimer = useRef<number | null>(null);
   const [leftTab, setLeftTab] = useState<"teams" | "inbox">("teams");
+
+  // AI insights
+  type AIAction =
+    | { type: "task"; title: string; due?: string; source: string; reason: string }
+    | { type: "event"; title: string; start: string; end: string; source: string; reason: string };
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiActions, setAiActions] = useState<AIAction[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiDismissed, setAiDismissed] = useState<Set<number>>(new Set());
+  const [aiAccepting, setAiAccepting] = useState<number | null>(null);
 
   const [tick, setTick] = useState(0);
   const [selectedDay, setSelectedDay] = useState(() => new Date().toISOString().split("T")[0]);
@@ -260,6 +272,74 @@ export default function DashboardPage() {
     } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
   }
 
+  /* ── AI insights ── */
+  async function runAiInsights() {
+    if (!account || aiLoading) return;
+    setAiLoading(true); setAiError(""); setAiDismissed(new Set());
+    try {
+      const payload = {
+        userName: profile?.displayName || account.name || "",
+        userEmail: profile?.mail || profile?.userPrincipalName || account.username || "",
+        emails: emails.slice(0, 15).map(m => ({
+          subject: m.subject, preview: m.bodyPreview,
+          sender: m.from?.emailAddress?.name || m.from?.emailAddress?.address || "Unknown",
+          receivedAt: m.receivedDateTime, isRead: m.isRead,
+        })),
+        chats: chats.slice(0, 20).map(c => ({
+          sender: c.lastMessagePreview?.from?.user?.displayName || c.topic || "Chat",
+          body: (c.lastMessagePreview?.body?.content || "").replace(/<[^>]+>/g, "").slice(0, 400),
+          createdAt: c.lastMessagePreview?.createdDateTime || "",
+        })),
+        events: events.slice(0, 20).map(e => ({
+          subject: e.subject, start: e.start.dateTime, end: e.end.dateTime,
+        })),
+        tasks: tasks.slice(0, 30).map(t => ({
+          title: t.title, due: t.dueDateTime?.dateTime,
+        })),
+      };
+      const r = await fetch("/api/ai/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      setAiSummary(data.summary || "");
+      setAiActions(Array.isArray(data.actions) ? data.actions : []);
+    } catch (e) { setAiError(e instanceof Error ? e.message : "Failed"); }
+    finally { setAiLoading(false); }
+  }
+
+  async function acceptAiAction(idx: number) {
+    if (!account) return;
+    const action = aiActions[idx];
+    if (!action) return;
+    setAiAccepting(idx);
+    try {
+      if (action.type === "task") {
+        const listId = newListId || lists[0]?.id;
+        if (!listId) throw new Error("No task list available");
+        const b: Record<string, unknown> = { title: action.title };
+        if (action.due) b.dueDateTime = { dateTime: action.due + "T00:00:00", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+        await graphFetch(account, `/me/todo/lists/${listId}/tasks`, { method: "POST", body: JSON.stringify(b) });
+        loadTasks(account);
+      } else {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        await graphFetch(account, "/me/events", {
+          method: "POST",
+          body: JSON.stringify({ subject: action.title, start: { dateTime: action.start, timeZone: tz }, end: { dateTime: action.end, timeZone: tz } }),
+        });
+        loadCalendar(account);
+      }
+      setAiDismissed(prev => new Set(prev).add(idx));
+    } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setAiAccepting(null); }
+  }
+
+  function dismissAiAction(idx: number) {
+    setAiDismissed(prev => new Set(prev).add(idx));
+  }
+
   async function sendReply(chatId: string) {
     if (!account || !replyText.trim()) return;
     setReplying(true);
@@ -381,6 +461,80 @@ export default function DashboardPage() {
         <div className="ms-stat"><span className="ms-stat-val">{dueToday}</span><span className="ms-stat-lbl">due today</span></div>
         <div className={`ms-stat${overdue > 0 ? " ms-stat-warn" : ""}`}><span className="ms-stat-val">{overdue}</span><span className="ms-stat-lbl">overdue</span></div>
       </div>
+
+      {/* ── AI INSIGHTS ── */}
+      <section className={`ms-ai${aiLoading ? " loading" : ""}`}>
+        <div className="ms-ai-glow" aria-hidden />
+        <div className="ms-ai-head">
+          <div className="ms-ai-title">
+            <span className="ms-ai-badge"><SparklesIcon size={14} /></span>
+            <span className="ms-ai-title-text">AI Insights</span>
+            {aiActions.filter((_, i) => !aiDismissed.has(i)).length > 0 && (
+              <span className="ms-ai-count">{aiActions.filter((_, i) => !aiDismissed.has(i)).length}</span>
+            )}
+          </div>
+          <button className="ms-ai-cta" onClick={runAiInsights} disabled={aiLoading}>
+            {aiLoading ? (
+              <><span className="ms-ai-spinner" /> <span>Analyzing…</span></>
+            ) : aiSummary || aiActions.length ? (
+              <><RefreshIcon size={13} /> <span>Re-analyze</span></>
+            ) : (
+              <><WandIcon size={13} /> <span>Analyze activity</span></>
+            )}
+          </button>
+        </div>
+
+        {aiError && <div className="ms-ai-err">{aiError}</div>}
+        {aiSummary && (
+          <div className="ms-ai-summary">
+            <div className="ms-ai-summary-bar" />
+            <p>{aiSummary}</p>
+          </div>
+        )}
+
+        {aiActions.length > 0 && (
+          <div className="ms-ai-actions">
+            {aiActions.map((a, i) => {
+              if (aiDismissed.has(i)) return null;
+              const isTask = a.type === "task";
+              return (
+                <div key={i} className={`ms-ai-action ms-ai-action-${a.type}`}>
+                  <div className="ms-ai-action-icon">
+                    {isTask ? <CheckCircleIcon size={18} /> : <CalendarIcon size={18} />}
+                  </div>
+                  <div className="ms-ai-action-main">
+                    <div className="ms-ai-action-head">
+                      <span className={`ms-ai-tag ms-ai-tag-${a.type}`}>{isTask ? "Task" : "Event"}</span>
+                      <span className="ms-ai-action-title">{a.title}</span>
+                    </div>
+                    <div className="ms-ai-action-meta">
+                      {isTask && a.due && <span className="ms-ai-action-when">due {a.due}</span>}
+                      {!isTask && <span className="ms-ai-action-when">{new Date(a.start).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+                      <span className="ms-ai-action-src">{a.source}</span>
+                    </div>
+                    <div className="ms-ai-action-reason">{a.reason}</div>
+                  </div>
+                  <div className="ms-ai-action-btns">
+                    <button className="ms-ai-accept" disabled={aiAccepting === i} onClick={() => acceptAiAction(i)} title="Add">
+                      {aiAccepting === i ? <span className="ms-ai-spinner-sm" /> : <CheckIcon size={16} />}
+                    </button>
+                    <button className="ms-ai-dismiss" onClick={() => dismissAiAction(i)} title="Dismiss">
+                      <XIcon size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!aiLoading && !aiError && !aiSummary && aiActions.length === 0 && (
+          <div className="ms-ai-empty">
+            <SparklesIcon size={18} />
+            <span>Let AI scan your emails, chats, and events for tasks and meetings you might miss.</span>
+          </div>
+        )}
+      </section>
 
       {/* ── MAIN LAYOUT ── */}
       <div className="ms-content">
