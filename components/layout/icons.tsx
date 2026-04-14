@@ -216,3 +216,43 @@ export const RefreshIcon = ({ size, className }: IconProps) => (
     <polyline points="3 21 3 16 8 16" />
   </svg>
 );
+
+/** Send — chat/message */
+export const SendIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </svg>
+);
+
+/** Reply — email reply */
+export const ReplyIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <polyline points="9 17 4 12 9 7" />
+    <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+  </svg>
+);
+
+/** Arrow Left — back navigation */
+export const ArrowLeftIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <line x1="19" y1="12" x2="5" y2="12" />
+    <polyline points="12 19 5 12 12 5" />
+  </svg>
+);
+
+/** Copy — clipboard */
+export const CopyIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+/** Mail — compose/envelope */
+export const MailIcon = ({ size, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <rect x="2" y="4" width="20" height="16" rx="2" />
+    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+  </svg>
+);

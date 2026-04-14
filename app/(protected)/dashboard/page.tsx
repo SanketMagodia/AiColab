@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AccountInfo } from "@azure/msal-browser";
 import { MS_SCOPES, getMsal, getRedirectResult, graphFetch, graphBlob } from "@/lib/msal";
-import { SparklesIcon, CheckCircleIcon, CalendarIcon, CheckIcon, XIcon, WandIcon, RefreshIcon } from "@/components/layout/icons";
+import {
+  SparklesIcon, CheckCircleIcon, CalendarIcon, CheckIcon, XIcon,
+  WandIcon, RefreshIcon, SendIcon, ReplyIcon, ArrowLeftIcon, CopyIcon,
+} from "@/components/layout/icons";
 
 /* ── types ── */
 type Email = {
@@ -16,7 +19,13 @@ type TodoList = { id: string; displayName: string };
 type TodoTask = { id: string; title: string; status: string; dueDateTime?: { dateTime: string }; listId: string; listName: string };
 type Chat = {
   id: string; topic?: string;
-  lastMessagePreview?: { id?: string; createdDateTime?: string; body?: { content?: string }; from?: { user?: { displayName?: string } } };
+  lastMessagePreview?: { id?: string; createdDateTime?: string; body?: { content?: string }; from?: { user?: { displayName?: string; id?: string } } };
+};
+type ChatMessage = {
+  id: string;
+  body?: { content?: string; contentType?: string };
+  from?: { user?: { displayName?: string; id?: string } };
+  createdDateTime?: string;
 };
 type Profile = { displayName?: string; userPrincipalName?: string; mail?: string; givenName?: string };
 type GraphUser = { id: string; displayName: string; mail?: string; userPrincipalName?: string; jobTitle?: string };
@@ -38,14 +47,18 @@ function greet() {
 }
 
 const HIGHLIGHT = ["sanket", "sanketmagodia"];
-// Only highlight when someone ELSE mentions the user — pass the sender name to exclude self
 const isHL = (t?: string, sender?: string) => {
   if (!t) return false;
-  // If the sender is the logged-in user, don't highlight
   if (sender && HIGHLIGHT.some(h => sender.toLowerCase().includes(h))) return false;
   return HIGHLIGHT.some(h => t.toLowerCase().includes(h));
 };
 const POLL = 60_000;
+const strip = (html?: string): string => {
+  if (!html) return "";
+  if (typeof window === "undefined") return html.replace(/<[^>]+>/g, "");
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return doc.body.textContent ?? "";
+};
 
 /* ══════════════════════════════════════ */
 export default function DashboardPage() {
@@ -67,19 +80,45 @@ export default function DashboardPage() {
   const [showCalForm, setShowCalForm] = useState(false);
   const [evtName, setEvtName] = useState(""); const [evtStart, setEvtStart] = useState(""); const [evtEnd, setEvtEnd] = useState("");
   const [newTitle, setNewTitle] = useState(""); const [newDue, setNewDue] = useState(""); const [newListId, setNewListId] = useState("");
-  const [replyChat, setReplyChat] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState(""); const [replying, setReplying] = useState(false);
 
-  // send-to-person
+  // DM search
   const [dmOpen, setDmOpen] = useState(false);
   const [dmQuery, setDmQuery] = useState("");
   const [dmResults, setDmResults] = useState<GraphUser[]>([]);
-  const [dmTarget, setDmTarget] = useState<GraphUser | null>(null);
-  const [dmMsg, setDmMsg] = useState("");
   const [dmSearching, setDmSearching] = useState(false);
-  const [dmSending, setDmSending] = useState(false);
   const searchTimer = useRef<number | null>(null);
   const [leftTab, setLeftTab] = useState<"teams" | "inbox">("teams");
+
+  // Chat window
+  const [chatView, setChatView] = useState<"list" | "chat">("list");
+  const [chatWindowId, setChatWindowId] = useState<string | null>(null);
+  const [chatWindowUser, setChatWindowUser] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatMsgText, setChatMsgText] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Smart reply suggestions
+  const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+
+  // Notification prompt
+  const [notifPrompt, setNotifPrompt] = useState<{ chatId: string; sender: string; body: string } | null>(null);
+  const [notifSuggestions, setNotifSuggestions] = useState<string[]>([]);
+  const [notifSugLoading, setNotifSugLoading] = useState(false);
+
+  // Email compose
+  const [emailReplyMode, setEmailReplyMode] = useState(false);
+  const [composeNew, setComposeNew] = useState(false);
+  const [emailDraftPrompt, setEmailDraftPrompt] = useState("");
+  const [emailDraftBody, setEmailDraftBody] = useState("");
+  const [emailDraftSubject, setEmailDraftSubject] = useState("");
+  const [emailTo, setEmailTo] = useState<string[]>([]);
+  const [emailCC, setEmailCC] = useState<string[]>([]);
+  const [emailBCC, setEmailBCC] = useState<string[]>([]);
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const [draftGenerating, setDraftGenerating] = useState(false);
 
   // AI insights
   type AIAction =
@@ -206,7 +245,15 @@ export default function DashboardPage() {
       const cs = (d?.value ?? []).filter(c => c.lastMessagePreview);
       cs.forEach(c => {
         const mid = c.lastMessagePreview!.id || c.id;
-        if (!seenChats.current.has(mid)) { if (!firstLoad.current.chat) notify("New Chat", c.lastMessagePreview!.from?.user?.displayName || ""); seenChats.current.add(mid); }
+        if (!seenChats.current.has(mid)) {
+          if (!firstLoad.current.chat) {
+            const sender = c.lastMessagePreview!.from?.user?.displayName || "";
+            const body = strip(c.lastMessagePreview?.body?.content);
+            notify("New Chat", sender);
+            setNotifPrompt({ chatId: c.id, sender, body });
+          }
+          seenChats.current.add(mid);
+        }
       });
       firstLoad.current.chat = false;
       setChats(cs); setErrs(p => ({ ...p, chat: "" }));
@@ -233,6 +280,9 @@ export default function DashboardPage() {
   /* ── actions ── */
   async function openEmail(id: string, wasUnread: boolean) {
     setExpandedEmail(id);
+    setEmailReplyMode(false);
+    setEmailDraftPrompt(""); setEmailDraftBody(""); setEmailDraftSubject("");
+    setEmailTo([]); setEmailCC([]); setEmailBCC([]); setShowCcBcc(false);
     if (!emailBodies[id] && account) {
       try {
         const msg = await graphFetch<{ body?: { content?: string; contentType?: string } }>(account, `/me/messages/${id}?$select=body`);
@@ -287,7 +337,7 @@ export default function DashboardPage() {
         })),
         chats: chats.slice(0, 20).map(c => ({
           sender: c.lastMessagePreview?.from?.user?.displayName || c.topic || "Chat",
-          body: (c.lastMessagePreview?.body?.content || "").replace(/<[^>]+>/g, "").slice(0, 400),
+          body: strip(c.lastMessagePreview?.body?.content).slice(0, 400),
           createdAt: c.lastMessagePreview?.createdDateTime || "",
         })),
         events: events.slice(0, 20).map(e => ({
@@ -340,14 +390,197 @@ export default function DashboardPage() {
     setAiDismissed(prev => new Set(prev).add(idx));
   }
 
-  async function sendReply(chatId: string) {
-    if (!account || !replyText.trim()) return;
-    setReplying(true);
+  /* ── Chat window ── */
+  async function loadChatMsgs(chatId: string, showLoading = true) {
+    if (!account) return;
+    if (showLoading) setChatLoading(true);
     try {
-      await graphFetch(account, `/me/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ body: { contentType: "text", content: replyText.trim() } }) });
-      setReplyText(""); setReplyChat(null); loadChats(account);
+      const d = await graphFetch<{ value: ChatMessage[] }>(account, `/me/chats/${chatId}/messages?$top=4`);
+      const msgs = (d?.value ?? []).filter(m => m.body?.content && m.from?.user).reverse();
+      setChatMessages(msgs);
+    } catch { /* noop */ }
+    finally { if (showLoading) setChatLoading(false); }
+  }
+
+  function openChatFromList(chat: Chat) {
+    const sender = chat.lastMessagePreview?.from?.user?.displayName || chat.topic || "Chat";
+    setChatWindowId(chat.id);
+    setChatWindowUser(sender);
+    setChatView("chat");
+    setChatMsgText("");
+    setSuggestedReplies([]);
+    loadChatMsgs(chat.id);
+    const body = strip(chat.lastMessagePreview?.body?.content);
+    if (body && sender) fetchSuggestions(body, sender);
+  }
+
+  async function openDmChat(user: GraphUser) {
+    if (!account) return;
+    setChatLoading(true);
+    try {
+      const myId = account.localAccountId;
+      const chat = await graphFetch<{ id: string }>(account, "/chats", {
+        method: "POST",
+        body: JSON.stringify({
+          chatType: "oneOnOne",
+          members: [
+            { "@odata.type": "#microsoft.graph.aadUserConversationMember", roles: ["owner"], "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${myId}')` },
+            { "@odata.type": "#microsoft.graph.aadUserConversationMember", roles: ["owner"], "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${user.id}')` },
+          ],
+        }),
+      });
+      if (chat?.id) {
+        setChatWindowId(chat.id);
+        setChatWindowUser(user.displayName);
+        setChatView("chat");
+        setDmOpen(false); setDmQuery(""); setDmResults([]);
+        setChatMsgText("");
+        setSuggestedReplies([]);
+        loadChatMsgs(chat.id);
+      }
+    } catch (e) { alert(`Failed to open chat: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setChatLoading(false); }
+  }
+
+  async function sendChatMessage() {
+    if (!account || !chatWindowId || !chatMsgText.trim()) return;
+    setChatSending(true);
+    try {
+      await graphFetch(account, `/me/chats/${chatWindowId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body: { contentType: "text", content: chatMsgText.trim() } }),
+      });
+      setChatMsgText("");
+      setSuggestedReplies([]);
+      loadChatMsgs(chatWindowId, false);
+      loadChats(account);
     } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
-    finally { setReplying(false); }
+    finally { setChatSending(false); }
+  }
+
+  function closeChatWindow() {
+    setChatView("list");
+    setChatWindowId(null);
+    setChatWindowUser("");
+    setChatMessages([]);
+    setSuggestedReplies([]);
+    setChatMsgText("");
+  }
+
+  /* ── Smart reply suggestions ── */
+  async function fetchSuggestions(message: string, sender: string) {
+    setSuggestedReplies([]);
+    setSuggestionsLoading(true);
+    try {
+      const r = await fetch("/api/ai/suggest-replies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, sender }),
+      });
+      const data = await r.json();
+      if (data?.suggestions) setSuggestedReplies(data.suggestions);
+    } catch { /* noop */ }
+    finally { setSuggestionsLoading(false); }
+  }
+
+  /* ── Notification reply ── */
+  async function sendNotifReply(text: string) {
+    if (!account || !notifPrompt) return;
+    try {
+      await graphFetch(account, `/me/chats/${notifPrompt.chatId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body: { contentType: "text", content: text } }),
+      });
+      setNotifPrompt(null);
+      setNotifSuggestions([]);
+      loadChats(account);
+    } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
+  }
+
+  function openChatFromNotif() {
+    if (!notifPrompt) return;
+    setChatWindowId(notifPrompt.chatId);
+    setChatWindowUser(notifPrompt.sender);
+    setChatView("chat");
+    setLeftTab("teams");
+    setChatMsgText("");
+    setSuggestedReplies([]);
+    loadChatMsgs(notifPrompt.chatId);
+    if (notifPrompt.body && notifPrompt.sender)
+      fetchSuggestions(notifPrompt.body, notifPrompt.sender);
+    setNotifPrompt(null);
+    setNotifSuggestions([]);
+  }
+
+  /* ── Email compose ── */
+  function startEmailReply() {
+    const email = emails.find(e => e.id === expandedEmail);
+    if (!email) return;
+    setEmailReplyMode(true);
+    setComposeNew(false);
+    const sender = email.from?.emailAddress?.address || "";
+    setEmailTo(sender ? [sender] : []);
+    setEmailDraftSubject(email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`);
+    setEmailDraftBody("");
+    setEmailDraftPrompt("");
+    setShowCcBcc(false);
+  }
+
+  function startComposeNew() {
+    setComposeNew(true);
+    setExpandedEmail(null);
+    setEmailReplyMode(true);
+    setEmailTo([]); setEmailCC([]); setEmailBCC([]);
+    setEmailDraftSubject("");
+    setEmailDraftBody("");
+    setEmailDraftPrompt("");
+    setShowCcBcc(true);
+  }
+
+  function closeEmailModal() {
+    setExpandedEmail(null);
+    setComposeNew(false);
+    setEmailReplyMode(false);
+  }
+
+  async function generateEmailDraft() {
+    if (!emailDraftPrompt.trim()) return;
+    setDraftGenerating(true);
+    try {
+      const email = expandedEmail ? emails.find(e => e.id === expandedEmail) : null;
+      const isReply = !!email;
+      const r = await fetch("/api/ai/draft-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: emailDraftPrompt,
+          replyType: isReply ? "reply" : "new",
+          userName: profile?.displayName || "",
+          originalSubject: email?.subject,
+          originalSender: email?.from?.emailAddress?.name || email?.from?.emailAddress?.address,
+          originalBody: email?.bodyPreview,
+        }),
+      });
+      const data = await r.json();
+      if (data?.body) setEmailDraftBody(data.body);
+      if (data?.subject) setEmailDraftSubject(data.subject);
+    } catch (e) { alert(`Draft failed: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setDraftGenerating(false); }
+  }
+
+  function openInOutlook() {
+    const params = new URLSearchParams();
+    if (emailTo.length) params.set("to", emailTo.join(";"));
+    if (emailCC.length) params.set("cc", emailCC.join(";"));
+    if (emailBCC.length) params.set("bcc", emailBCC.join(";"));
+    if (emailDraftSubject) params.set("subject", emailDraftSubject);
+    if (emailDraftBody) params.set("body", emailDraftBody);
+    window.open(`https://outlook.office365.com/mail/deeplink/compose?${params.toString()}`, "_blank");
+  }
+
+  function copyDraftToClipboard() {
+    const text = `To: ${emailTo.join("; ")}\n${emailCC.length ? `CC: ${emailCC.join("; ")}\n` : ""}${emailBCC.length ? `BCC: ${emailBCC.join("; ")}\n` : ""}Subject: ${emailDraftSubject}\n\n${emailDraftBody}`;
+    navigator.clipboard.writeText(text).catch(() => {});
   }
 
   /* ── DM search (debounced) ── */
@@ -370,28 +603,41 @@ export default function DashboardPage() {
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [dmQuery, dmOpen, account]);
 
-  async function sendDm() {
-    if (!account || !dmTarget || !dmMsg.trim()) return;
-    setDmSending(true);
-    try {
-      const myId = account.localAccountId;
-      const chat = await graphFetch<{ id: string }>(account, "/chats", {
-        method: "POST",
-        body: JSON.stringify({
-          chatType: "oneOnOne",
-          members: [
-            { "@odata.type": "#microsoft.graph.aadUserConversationMember", roles: ["owner"], "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${myId}')` },
-            { "@odata.type": "#microsoft.graph.aadUserConversationMember", roles: ["owner"], "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${dmTarget.id}')` },
-          ],
-        }),
-      });
-      if (!chat?.id) throw new Error("No chat id returned");
-      await graphFetch(account, `/chats/${chat.id}/messages`, { method: "POST", body: JSON.stringify({ body: { contentType: "text", content: dmMsg.trim() } }) });
-      setDmOpen(false); setDmQuery(""); setDmResults([]); setDmTarget(null); setDmMsg("");
-      loadChats(account);
-    } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
-    finally { setDmSending(false); }
-  }
+  /* ── Auto-scroll chat to bottom ── */
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  /* ── Auto-refresh chat messages ── */
+  useEffect(() => {
+    if (!account || !chatWindowId || chatView !== "chat") return;
+    const id = setInterval(async () => {
+      try {
+        const d = await graphFetch<{ value: ChatMessage[] }>(account, `/me/chats/${chatWindowId}/messages?$top=4`);
+        setChatMessages((d?.value ?? []).filter(m => m.body?.content && m.from?.user).reverse());
+      } catch { /* noop */ }
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [account, chatWindowId, chatView]);
+
+  /* ── Notification prompt: fetch suggestions + auto-dismiss ── */
+  useEffect(() => {
+    if (!notifPrompt) return;
+    setNotifSuggestions([]);
+    setNotifSugLoading(true);
+    fetch("/api/ai/suggest-replies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: notifPrompt.body, sender: notifPrompt.sender }),
+    })
+      .then(r => r.json())
+      .then(d => { if (d?.suggestions) setNotifSuggestions(d.suggestions); })
+      .catch(() => {})
+      .finally(() => setNotifSugLoading(false));
+
+    const t = setTimeout(() => { setNotifPrompt(null); setNotifSuggestions([]); }, 30_000);
+    return () => clearTimeout(t);
+  }, [notifPrompt]);
 
   /* ── early states ── */
   if (initError) return (
@@ -424,13 +670,14 @@ export default function DashboardPage() {
   const allTasksSorted = [...tasks].sort((a, b) => { const pa = pri(a), pb = pri(b); if (pa !== pb) return pa - pb; const da = a.dueDateTime?.dateTime, db = b.dueDateTime?.dateTime; if (da && db) return new Date(da).getTime() - new Date(db).getTime(); return 0; });
   const firstName = profile?.givenName || profile?.displayName?.split(" ")[0] || "";
 
-  // Week grid: Mon–Sun of the week containing today
   const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // Monday
+  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
   weekStart.setHours(0, 0, 0, 0);
   const weekDays = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d; });
   const eventsOnDay = (ds: string) => events.filter(e => new Date(e.start.dateTime + "Z").toISOString().split("T")[0] === ds);
   const selectedDayEvts = eventsOnDay(selectedDay);
+
+  const myId = account.localAccountId;
 
   return (
     <div className="ms-dashboard">
@@ -453,6 +700,33 @@ export default function DashboardPage() {
           <button className="btn-ghost" onClick={signOut}>Sign out</button>
         </div>
       </header>
+
+      {/* ── NOTIFICATION PROMPT ── */}
+      {notifPrompt && (
+        <div className="ms-notif-banner">
+          <div className="ms-notif-banner-content">
+            <div className="ms-avatar ms-avatar-sm">{ini(notifPrompt.sender)}</div>
+            <div className="ms-notif-banner-text">
+              <span className="ms-notif-banner-sender">{notifPrompt.sender}</span>
+              <span className="ms-notif-banner-body">{notifPrompt.body.slice(0, 120)}{notifPrompt.body.length > 120 ? "…" : ""}</span>
+            </div>
+          </div>
+          {notifSugLoading && <div className="ms-muted-small" style={{ paddingLeft: 36 }}>Generating reply options…</div>}
+          {notifSuggestions.length > 0 && (
+            <div className="ms-notif-suggestions">
+              {notifSuggestions.map((s, i) => (
+                <button key={i} className="ms-sug-pill" onClick={() => sendNotifReply(s)} title={s}>{s}</button>
+              ))}
+            </div>
+          )}
+          <div className="ms-notif-banner-actions">
+            <button className="btn" onClick={openChatFromNotif}>
+              <ReplyIcon size={13} /> Reply
+            </button>
+            <button className="btn-ghost" onClick={() => { setNotifPrompt(null); setNotifSuggestions([]); }}>Dismiss</button>
+          </div>
+        </div>
+      )}
 
       {/* ── STATS ── */}
       <div className="ms-stats">
@@ -555,9 +829,14 @@ export default function DashboardPage() {
                 onClick={() => setLeftTab("inbox")}>
                 Inbox{unread > 0 ? ` (${unread})` : ""}
               </button>
-              {leftTab === "teams" && (
-                <button className="btn-ghost ms-tab-action" onClick={() => { setDmOpen(v => !v); setDmTarget(null); setDmQuery(""); setDmResults([]); setDmMsg(""); }}>
+              {leftTab === "teams" && chatView === "list" && (
+                <button className="btn-ghost ms-tab-action" onClick={() => { setDmOpen(v => !v); setDmQuery(""); setDmResults([]); }}>
                   {dmOpen ? "Cancel" : "New message"}
+                </button>
+              )}
+              {leftTab === "inbox" && (
+                <button className="btn-ghost ms-tab-action" onClick={startComposeNew}>
+                  Compose
                 </button>
               )}
             </div>
@@ -565,16 +844,76 @@ export default function DashboardPage() {
             {/* TEAMS tab */}
             {leftTab === "teams" && (
               <>
-                {dmOpen && (
-                  <div className="ms-compose">
-                    {!dmTarget ? (
-                      <>
-                        <input autoFocus placeholder="Name or email..." value={dmQuery} onChange={e => setDmQuery(e.target.value)} />
+                {/* ── CHAT WINDOW VIEW ── */}
+                {chatView === "chat" && chatWindowId ? (
+                  <div className="ms-chat-window">
+                    <div className="ms-chat-window-head">
+                      <button className="ms-chat-window-back" onClick={closeChatWindow} title="Back to chats">
+                        <ArrowLeftIcon size={16} />
+                      </button>
+                      <div className="ms-avatar ms-avatar-sm">{ini(chatWindowUser)}</div>
+                      <span className="ms-chat-window-name">{chatWindowUser}</span>
+                    </div>
+                    <div className="ms-chat-window-messages">
+                      {chatLoading && <div className="ms-muted-small" style={{ textAlign: "center", padding: 20 }}>Loading messages…</div>}
+                      {!chatLoading && chatMessages.length === 0 && (
+                        <div className="ms-muted-small" style={{ textAlign: "center", padding: 40 }}>No messages yet. Say hi!</div>
+                      )}
+                      {chatMessages.map(m => {
+                        const self = m.from?.user?.id === myId;
+                        const bodyText = strip(m.body?.content);
+                        if (!bodyText) return null;
+                        return (
+                          <div key={m.id} className={`ms-msg${self ? " self" : ""}`}>
+                            {!self && <div className="ms-avatar ms-avatar-sm ms-msg-avatar">{ini(m.from?.user?.displayName)}</div>}
+                            <div className="ms-msg-content">
+                              {!self && <div className="ms-msg-name">{m.from?.user?.displayName}</div>}
+                              <div className="ms-msg-bubble">{bodyText}</div>
+                              <div className={`ms-msg-time${self ? " self" : ""}`}>{fmtTime(m.createdDateTime)}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div ref={chatEndRef} />
+                    </div>
+                    {/* Smart reply suggestions */}
+                    {(suggestedReplies.length > 0 || suggestionsLoading) && (
+                      <div className="ms-suggestions">
+                        {suggestionsLoading && <span className="ms-muted-small">Thinking…</span>}
+                        {suggestedReplies.map((s, i) => (
+                          <button key={i} className="ms-sug-pill"
+                            onClick={() => { setChatMsgText(s); }}
+                            title={s}>
+                            {s.length > 50 ? s.slice(0, 50) + "…" : s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="ms-chat-window-input">
+                      <input
+                        autoFocus
+                        placeholder="Type a message…"
+                        value={chatMsgText}
+                        onChange={e => setChatMsgText(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                        disabled={chatSending}
+                      />
+                      <button className="ms-chat-send-btn" onClick={sendChatMessage} disabled={chatSending || !chatMsgText.trim()} title="Send">
+                        <SendIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── CHAT LIST VIEW ── */
+                  <>
+                    {dmOpen && (
+                      <div className="ms-compose">
+                        <input autoFocus placeholder="Search by name or email…" value={dmQuery} onChange={e => setDmQuery(e.target.value)} />
                         <div className="ms-compose-results">
-                          {dmSearching && <div className="ms-muted-small">Searching...</div>}
+                          {dmSearching && <div className="ms-muted-small">Searching…</div>}
                           {!dmSearching && dmQuery.trim().length >= 2 && dmResults.length === 0 && <div className="ms-muted-small">No results</div>}
                           {dmResults.map(u => (
-                            <button key={u.id} className="ms-compose-user" onClick={() => setDmTarget(u)}>
+                            <button key={u.id} className="ms-compose-user" onClick={() => openDmChat(u)}>
                               <div className="ms-avatar ms-avatar-sm">{ini(u.displayName)}</div>
                               <div>
                                 <div className="ms-compose-name">{u.displayName}</div>
@@ -583,65 +922,41 @@ export default function DashboardPage() {
                             </button>
                           ))}
                         </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="ms-compose-to">
-                          <span className="ms-muted-small">To</span>
-                          <div className="ms-avatar ms-avatar-sm">{ini(dmTarget.displayName)}</div>
-                          <span className="ms-compose-name">{dmTarget.displayName}</span>
-                          <button className="btn-ghost" onClick={() => setDmTarget(null)}>Change</button>
-                        </div>
-                        <textarea autoFocus rows={3} placeholder="Write a message... (Ctrl+Enter to send)"
-                          value={dmMsg} onChange={e => setDmMsg(e.target.value)}
-                          onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendDm(); }}
-                          disabled={dmSending} />
-                        <div className="ms-compose-footer">
-                          <button className="btn" onClick={sendDm} disabled={dmSending || !dmMsg.trim()}>
-                            {dmSending ? "Sending..." : "Send"}
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-                <div className="ms-panel-body ms-scroll-body">
-                  {errs.chat ? <div className="ms-err">{errs.chat}</div>
-                  : chats.length === 0 ? <Empty text="No recent chats" />
-                  : chats.map(c => {
-                    const p = c.lastMessagePreview!;
-                    const sender = p.from?.user?.displayName || c.topic || "Chat";
-                    const body = (p.body?.content || "").replace(/<[^>]+>/g, "");
-                    // Highlight only if someone else mentions the user — not the user's own messages
-                    const hi = isHL(body, sender) || isHL(c.topic, sender);
-                    const open = replyChat === c.id;
-                    return (
-                      <div key={c.id} className={`ms-chat${hi ? " mention" : ""}`}
-                        onClick={() => { if (!open) { setReplyChat(c.id); setReplyText(""); } }}>
-                        <div className="ms-chat-row">
-                          <div className="ms-avatar ms-avatar-sm">{ini(sender)}</div>
-                          <div className="ms-chat-body">
-                            <div className="ms-chat-meta">
-                              <span className="ms-chat-name">{sender}</span>
-                              <span className="ms-chat-time">{fmtTime(p.createdDateTime)}</span>
-                            </div>
-                            <div className="ms-chat-preview">{body}</div>
-                          </div>
-                        </div>
-                        {open && (
-                          <div className="ms-chat-reply" onClick={e => e.stopPropagation()}>
-                            <input autoFocus placeholder="Reply..." value={replyText}
-                              onChange={e => setReplyText(e.target.value)}
-                              onKeyDown={e => { if (e.key === "Enter") sendReply(c.id); if (e.key === "Escape") setReplyChat(null); }}
-                              disabled={replying} />
-                            <button className="btn" onClick={() => sendReply(c.id)} disabled={replying || !replyText.trim()}>{replying ? "..." : "Send"}</button>
-                            <button className="btn-ghost" onClick={() => setReplyChat(null)}>Cancel</button>
-                          </div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
+                    )}
+                    <div className="ms-panel-body ms-scroll-body">
+                      {errs.chat ? <div className="ms-err">{errs.chat}</div>
+                      : (() => {
+                        const inbound = chats.filter(c => {
+                          const fromId = c.lastMessagePreview?.from?.user?.id;
+                          return !fromId || fromId !== myId;
+                        });
+                        if (inbound.length === 0) return <Empty text="No recent chats" />;
+                        return inbound.map(c => {
+                          const p = c.lastMessagePreview!;
+                          const sender = p.from?.user?.displayName || c.topic || "Chat";
+                          const body = strip(p.body?.content);
+                          const hi = isHL(body, sender) || isHL(c.topic, sender);
+                          return (
+                            <div key={c.id} className={`ms-chat${hi ? " mention" : ""}`}
+                              onClick={() => openChatFromList(c)}>
+                              <div className="ms-chat-row">
+                                <div className="ms-avatar ms-avatar-sm">{ini(sender)}</div>
+                                <div className="ms-chat-body">
+                                  <div className="ms-chat-meta">
+                                    <span className="ms-chat-name">{sender}</span>
+                                    <span className="ms-chat-time">{fmtTime(p.createdDateTime)}</span>
+                                  </div>
+                                  <div className="ms-chat-preview">{body}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </>
+                )}
               </>
             )}
 
@@ -651,7 +966,6 @@ export default function DashboardPage() {
                 {errs.email ? <div className="ms-err">{errs.email} <button className="btn-ghost" onClick={() => loadEmails(account)}>Retry</button></div>
                 : emails.length === 0 ? <Empty text="Inbox zero" />
                 : emails.map(m => {
-                  // Highlight emails where subject/preview mentions the user but sender is not the user
                   const senderName = m.from?.emailAddress?.name || m.from?.emailAddress?.address || "";
                   const hi = isHL(m.subject, senderName) || isHL(m.bodyPreview, senderName);
                   return (
@@ -676,8 +990,6 @@ export default function DashboardPage() {
 
           {/* CALENDAR WIDGET */}
           <section className="ms-panel ms-cal-panel">
-
-            {/* Next event card */}
             {nextEvt ? (
               <div className="ms-next-evt ms-next-evt-highlight">
                 <div className="ms-next-evt-pill">up next · in {relTime(nextEvt.start.dateTime + "Z")}</div>
@@ -688,7 +1000,6 @@ export default function DashboardPage() {
               <div className="ms-next-evt ms-next-evt-empty">No upcoming events</div>
             )}
 
-            {/* Week grid */}
             <div className="ms-week">
               {weekDays.map(d => {
                 const ds = d.toISOString().split("T")[0];
@@ -709,7 +1020,6 @@ export default function DashboardPage() {
               })}
             </div>
 
-            {/* Selected day events */}
             <div className="ms-day-evts">
               {selectedDayEvts.length === 0
                 ? <div className="ms-muted-small">{selectedDay === todayStr ? "Nothing today" : "No events"}</div>
@@ -721,7 +1031,6 @@ export default function DashboardPage() {
                 ))}
             </div>
 
-            {/* New event form */}
             <div className="ms-cal-foot">
               <button className="btn-ghost ms-cal-add-btn" onClick={() => setShowCalForm(v => !v)}>
                 {showCalForm ? "Cancel" : "+ New event"}
@@ -776,50 +1085,134 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── EMAIL MODAL ── */}
-      {expandedEmail && (() => {
-        const m = emails.find(e => e.id === expandedEmail);
-        if (!m) return null;
-        const htmlBody = emailBodies[expandedEmail];
+      {/* ── EMAIL MODAL (view existing OR compose new) ── */}
+      {(expandedEmail || composeNew) && (() => {
+        const m = expandedEmail ? emails.find(e => e.id === expandedEmail) : null;
+        if (expandedEmail && !m) return null;
+        const htmlBody = expandedEmail ? emailBodies[expandedEmail] : null;
+        const isCompose = composeNew || emailReplyMode;
+
         return (
-          <div className="ms-mail-backdrop" onClick={() => setExpandedEmail(null)}>
+          <div className="ms-mail-backdrop" onClick={closeEmailModal}>
             <div className="ms-mail-modal" onClick={e => e.stopPropagation()}>
+              {/* Header */}
               <div className="ms-mail-modal-head">
                 <div className="ms-mail-modal-meta">
-                  <div className="ms-mail-modal-subject">{m.subject}</div>
-                  <div className="ms-mail-modal-info">
-                    <span className="ms-mail-modal-from">{m.from?.emailAddress?.name || m.from?.emailAddress?.address}</span>
-                    <span className="ms-mail-modal-date">{fmtDate(m.receivedDateTime)} · {fmtTime(m.receivedDateTime)}</span>
+                  {composeNew ? (
+                    <div className="ms-mail-modal-subject">New Email</div>
+                  ) : m && (
+                    <>
+                      <div className="ms-mail-modal-subject">{m.subject}</div>
+                      <div className="ms-mail-modal-info">
+                        <span className="ms-mail-modal-from">{m.from?.emailAddress?.name || m.from?.emailAddress?.address}</span>
+                        <span className="ms-mail-modal-date">{fmtDate(m.receivedDateTime)} · {fmtTime(m.receivedDateTime)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="ms-mail-modal-actions">
+                  {m && !emailReplyMode && (
+                    <button className="btn" onClick={startEmailReply}>
+                      <ReplyIcon size={13} /> Reply
+                    </button>
+                  )}
+                  <button className="btn-ghost" onClick={closeEmailModal}>Close</button>
+                </div>
+              </div>
+
+              {/* Email body (only when viewing an existing email) */}
+              {m && !composeNew && (
+                <div className={`ms-mail-modal-body${emailReplyMode ? " ms-mail-body-compact" : ""}`}>
+                  {!htmlBody ? <div className="ms-muted-small" style={{ padding: 20 }}>Loading…</div>
+                  : <iframe title="Email" sandbox="allow-same-origin"
+                      srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+                        *,*::before,*::after{box-sizing:border-box}
+                        html,body,table,tbody,tr,td,th,div,span,p,section,article,header,footer,main{
+                          background-color:#18181b!important;color:#e4e4e7!important;
+                          border-color:#3f3f46!important;
+                        }
+                        body{margin:0;padding:20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.6;word-wrap:break-word}
+                        a{color:#38bdf8!important}
+                        img{max-width:100%!important;height:auto;filter:brightness(0.92)}
+                        table{max-width:100%;border-collapse:collapse}td,th{padding:4px 8px}
+                        blockquote{margin:8px 0;padding-left:12px;border-left:3px solid #52525b!important;color:#a1a1aa!important}
+                        pre,code{font-family:ui-monospace,monospace;font-size:13px;background:#09090b!important;border-radius:4px}
+                        pre{padding:12px;overflow-x:auto}code{padding:2px 5px}
+                        h1,h2,h3,h4,h5,h6{margin:16px 0 8px;line-height:1.3;color:#f4f4f5!important}
+                        p{margin:0 0 8px}ul,ol{padding-left:20px;margin:0 0 8px}
+                        hr{border:none;border-top:1px solid #3f3f46!important;margin:12px 0}
+                        [style*="color:#fff"],[style*="color: #fff"],[style*="color:white"],[style*="color: white"]{color:#e4e4e7!important}
+                      </style></head><body>${htmlBody}</body></html>`}
+                      className="ms-mail-iframe" />}
+                </div>
+              )}
+
+              {/* ── COMPOSE SECTION (reply or fresh) ── */}
+              {isCompose && (
+                <div className={`ms-mail-compose${composeNew ? " ms-mail-compose-full" : ""}`}>
+                  {!composeNew && (
+                    <div className="ms-mail-compose-head">
+                      <span className="ms-mail-compose-title">Reply</span>
+                      <button className="btn-ghost" onClick={() => setEmailReplyMode(false)} style={{ fontSize: 12 }}>Cancel</button>
+                    </div>
+                  )}
+                  <EmailChipInput label="To" chips={emailTo}
+                    onAdd={v => setEmailTo(p => [...p, v])}
+                    onRemove={i => setEmailTo(p => p.filter((_, j) => j !== i))}
+                    account={account} />
+                  {!showCcBcc && (
+                    <button className="btn-ghost" onClick={() => setShowCcBcc(true)} style={{ fontSize: 11, padding: "2px 8px", alignSelf: "flex-start" }}>
+                      + CC / BCC
+                    </button>
+                  )}
+                  {showCcBcc && (
+                    <>
+                      <EmailChipInput label="CC" chips={emailCC}
+                        onAdd={v => setEmailCC(p => [...p, v])}
+                        onRemove={i => setEmailCC(p => p.filter((_, j) => j !== i))}
+                        account={account} />
+                      <EmailChipInput label="BCC" chips={emailBCC}
+                        onAdd={v => setEmailBCC(p => [...p, v])}
+                        onRemove={i => setEmailBCC(p => p.filter((_, j) => j !== i))}
+                        account={account} />
+                    </>
+                  )}
+                  <div className="ms-chip-field">
+                    <span className="ms-chip-label">Subj</span>
+                    <input value={emailDraftSubject} onChange={e => setEmailDraftSubject(e.target.value)} style={{ flex: 1 }} />
+                  </div>
+                  <div className="ms-draft-section">
+                    <div className="ms-draft-row">
+                      <input
+                        placeholder={composeNew
+                          ? "Describe what you want to write… e.g. 'Ask John about the Q3 report deadline'"
+                          : "Describe what you want to say… e.g. 'Thank them and confirm the meeting'"}
+                        value={emailDraftPrompt}
+                        onChange={e => setEmailDraftPrompt(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") generateEmailDraft(); }}
+                      />
+                      <button className="btn ms-draft-gen" onClick={generateEmailDraft} disabled={draftGenerating || !emailDraftPrompt.trim()}>
+                        {draftGenerating ? <><span className="ms-ai-spinner" /> Generating…</> : <><SparklesIcon size={13} /> Generate</>}
+                      </button>
+                    </div>
+                    <textarea
+                      rows={composeNew ? 12 : 6}
+                      placeholder={composeNew ? "Your email will appear here… You can also write directly." : "Your reply will appear here… You can also write directly."}
+                      value={emailDraftBody}
+                      onChange={e => setEmailDraftBody(e.target.value)}
+                      className="ms-draft-body"
+                    />
+                  </div>
+                  <div className="ms-compose-actions">
+                    <button className="btn-ghost" onClick={copyDraftToClipboard} disabled={!emailDraftBody.trim()}>
+                      <CopyIcon size={13} /> Copy
+                    </button>
+                    <button className="btn" onClick={openInOutlook} disabled={!emailDraftBody.trim() && !emailTo.length}>
+                      <SendIcon size={13} /> Open in Outlook
+                    </button>
                   </div>
                 </div>
-                <button className="btn-ghost" onClick={() => setExpandedEmail(null)}>Close</button>
-              </div>
-              <div className="ms-mail-modal-body">
-                {!htmlBody ? <div className="ms-muted-small" style={{ padding: 20 }}>Loading...</div>
-                : <iframe title="Email" sandbox="allow-same-origin"
-                    srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-                      *,*::before,*::after{box-sizing:border-box}
-                      /* Force dark theme — override any inline bgcolor/color from email HTML */
-                      html,body,table,tbody,tr,td,th,div,span,p,section,article,header,footer,main{
-                        background-color:#18181b!important;color:#e4e4e7!important;
-                        border-color:#3f3f46!important;
-                      }
-                      body{margin:0;padding:20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.6;word-wrap:break-word}
-                      a{color:#38bdf8!important}
-                      /* Keep images natural but slightly dim them */
-                      img{max-width:100%!important;height:auto;filter:brightness(0.92)}
-                      table{max-width:100%;border-collapse:collapse}td,th{padding:4px 8px}
-                      blockquote{margin:8px 0;padding-left:12px;border-left:3px solid #52525b!important;color:#a1a1aa!important}
-                      pre,code{font-family:ui-monospace,monospace;font-size:13px;background:#09090b!important;border-radius:4px}
-                      pre{padding:12px;overflow-x:auto}code{padding:2px 5px}
-                      h1,h2,h3,h4,h5,h6{margin:16px 0 8px;line-height:1.3;color:#f4f4f5!important}
-                      p{margin:0 0 8px}ul,ol{padding-left:20px;margin:0 0 8px}
-                      hr{border:none;border-top:1px solid #3f3f46!important;margin:12px 0}
-                      /* Muted text that was near-white on light bg — bring it up */
-                      [style*="color:#fff"],[style*="color: #fff"],[style*="color:white"],[style*="color: white"]{color:#e4e4e7!important}
-                    </style></head><body>${htmlBody}</body></html>`}
-                    className="ms-mail-iframe" />}
-              </div>
+              )}
             </div>
           </div>
         );
@@ -828,6 +1221,90 @@ export default function DashboardPage() {
   );
 }
 
+/* ── Helper components ── */
 function Empty({ text }: { text: string }) {
   return <div className="ms-empty">{text}</div>;
+}
+
+function EmailChipInput({ label, chips, onAdd, onRemove, account }: {
+  label: string;
+  chips: string[];
+  onAdd: (email: string) => void;
+  onRemove: (idx: number) => void;
+  account?: AccountInfo | null;
+}) {
+  const [input, setInput] = useState("");
+  const [suggestions, setSuggestions] = useState<{ displayName: string; mail?: string; userPrincipalName?: string }[]>([]);
+  const [searching, setSearching] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const q = input.trim();
+    if (q.length < 2 || !account) { setSuggestions([]); return; }
+    setSearching(true);
+    timerRef.current = window.setTimeout(async () => {
+      try {
+        const esc = q.replace(/"/g, "");
+        const d = await graphFetch<{ value: { displayName: string; mail?: string; userPrincipalName?: string }[] }>(
+          account,
+          `/users?$top=5&$select=displayName,mail,userPrincipalName&$search="displayName:${esc}" OR "mail:${esc}"`,
+          { headers: { ConsistencyLevel: "eventual" } as any },
+        );
+        setSuggestions(d?.value ?? []);
+      } catch { setSuggestions([]); }
+      finally { setSearching(false); }
+    }, 300);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [input, account]);
+
+  function pickSuggestion(s: { mail?: string; userPrincipalName?: string }) {
+    const email = s.mail || s.userPrincipalName || "";
+    if (email) { onAdd(email); setInput(""); setSuggestions([]); }
+  }
+
+  return (
+    <div className="ms-chip-field">
+      <span className="ms-chip-label">{label}</span>
+      <div className="ms-chip-outer">
+        <div className="ms-chip-wrap">
+          {chips.map((c, i) => (
+            <span key={i} className="ms-chip">
+              {c}
+              <button className="ms-chip-x" onClick={() => onRemove(i)}>×</button>
+            </span>
+          ))}
+          <input
+            className="ms-chip-input"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="Name or email…"
+            onKeyDown={e => {
+              if ((e.key === "Enter" || e.key === ",") && input.trim()) {
+                e.preventDefault();
+                onAdd(input.trim().replace(/,$/, ""));
+                setInput("");
+                setSuggestions([]);
+              }
+              if (e.key === "Backspace" && !input && chips.length > 0) {
+                onRemove(chips.length - 1);
+              }
+              if (e.key === "Escape") { setSuggestions([]); }
+            }}
+          />
+        </div>
+        {(suggestions.length > 0 || searching) && (
+          <div className="ms-chip-suggestions">
+            {searching && <div className="ms-muted-small" style={{ padding: "4px 8px" }}>Searching…</div>}
+            {suggestions.map((s, i) => (
+              <button key={i} className="ms-chip-sug" onClick={() => pickSuggestion(s)}>
+                <span className="ms-chip-sug-name">{s.displayName}</span>
+                <span className="ms-chip-sug-email">{s.mail || s.userPrincipalName}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

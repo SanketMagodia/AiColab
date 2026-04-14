@@ -6,9 +6,13 @@ import { LogoutIcon } from "./icons";
 
 export default function TopBar() {
   const router = useRouter();
-  function logout() {
-    localStorage.removeItem("teamhub_auth");
-    router.replace("/");
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      localStorage.removeItem("teamhub_auth");
+      router.replace("/");
+    }
   }
   return (
     <div className="topbar">

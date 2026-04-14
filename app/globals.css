@@ -1241,33 +1241,205 @@ html[data-theme="light"] .drawing-style-popover {
   .ms-ai-action-btns { margin-left: auto; }
 }
 
-/* EMAIL MODAL */
+/* EMAIL MODAL — full screen */
 .ms-mail-backdrop {
   position: fixed; inset: 0; z-index: 60;
-  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(2px);
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px; animation: fadein 0.15s ease;
+  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: stretch; justify-content: stretch;
+  padding: 16px; animation: fadein 0.15s ease;
 }
 .ms-mail-modal {
   background: var(--bg-2); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); width: 720px; max-width: 100%;
-  max-height: 85vh; display: flex; flex-direction: column;
+  border-radius: var(--radius-lg); width: 100%; height: 100%;
+  display: flex; flex-direction: column;
   overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  animation: slidein 0.2s ease;
+  animation: fadein 0.2s ease;
 }
 .ms-mail-modal-head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
-  padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  padding: 16px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .ms-mail-modal-meta { flex: 1; min-width: 0; }
-.ms-mail-modal-subject { font-size: 15px; font-weight: 600; line-height: 1.3; }
+.ms-mail-modal-subject { font-size: 18px; font-weight: 600; line-height: 1.3; }
 .ms-mail-modal-info { display: flex; align-items: center; gap: 12px; margin-top: 5px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
 .ms-mail-modal-from { font-weight: 500; }
 .ms-mail-modal-date { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-faint); }
-.ms-mail-modal-body { flex: 1; overflow: hidden; }
-.ms-mail-iframe { width: 100%; height: 100%; min-height: 300px; border: none; background: transparent; display: block; }
+.ms-mail-modal-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ms-mail-modal-body { flex: 1; overflow: hidden; min-height: 0; }
+.ms-mail-iframe { width: 100%; height: 100%; min-height: 200px; border: none; background: transparent; display: block; }
 @media (max-width: 640px) {
-  .ms-mail-modal { max-height: 90vh; }
+  .ms-mail-backdrop { padding: 0; }
+  .ms-mail-modal { border-radius: 0; }
   .ms-mail-modal-head { padding: 12px 16px; }
 }
+
+/* EMAIL COMPOSE */
+.ms-mail-compose {
+  padding: 16px 20px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 45vh; overflow-y: auto; scrollbar-width: thin;
+  flex-shrink: 0;
+}
+.ms-mail-compose-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 2px;
+}
+.ms-mail-compose-title { font-weight: 600; font-size: 14px; }
+.ms-chip-field { display: flex; align-items: flex-start; gap: 8px; }
+.ms-chip-label {
+  font-size: 11px; color: var(--text-dim); font-weight: 600;
+  min-width: 32px; padding-top: 8px; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.ms-chip-wrap {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex: 1;
+  padding: 4px 6px; background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius); min-height: 36px;
+}
+.ms-chip-wrap:focus-within { border-color: var(--accent); }
+.ms-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.ms-chip-x { font-size: 14px; cursor: pointer; color: var(--text-dim); line-height: 1; background: none; border: none; padding: 0; }
+.ms-chip-x:hover { color: var(--danger); }
+.ms-chip-input {
+  border: none !important; background: transparent !important; outline: none !important;
+  padding: 4px !important; font-size: 13px; min-width: 120px; flex: 1;
+  color: var(--text); width: auto !important;
+}
+.ms-draft-section { display: flex; flex-direction: column; gap: 8px; }
+.ms-draft-row { display: flex; gap: 8px; align-items: center; }
+.ms-draft-row input { flex: 1; }
+.ms-draft-gen { white-space: nowrap; }
+.ms-draft-body { resize: vertical; min-height: 80px; font-size: 13px; line-height: 1.55; }
+.ms-compose-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+
+/* Full-screen compose (new email) fills entire modal body */
+.ms-mail-compose-full { flex: 1; max-height: none; overflow-y: auto; }
+.ms-mail-compose-full .ms-draft-body { flex: 1; min-height: 160px; }
+
+/* Compact email body when reply panel is open */
+.ms-mail-body-compact { max-height: 35vh; flex: none; overflow: hidden; }
+
+/* Chip field outer wrapper for suggestion dropdown positioning */
+.ms-chip-outer { flex: 1; position: relative; }
+
+/* Contact suggestion dropdown */
+.ms-chip-suggestions {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  max-height: 180px; overflow-y: auto; scrollbar-width: thin;
+}
+.ms-chip-sug {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px; text-align: left;
+  background: transparent; border: none; color: var(--text);
+  cursor: pointer; transition: background 0.1s;
+  border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.ms-chip-sug:last-child { border-bottom: none; }
+.ms-chip-sug:hover { background: var(--card-hover); }
+.ms-chip-sug-name { font-weight: 500; }
+.ms-chip-sug-email { font-size: 11px; color: var(--text-dim); }
+
+/* ══════════ CHAT WINDOW ══════════ */
+.ms-left-panel { display: flex; flex-direction: column; }
+.ms-chat-window { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.ms-chat-window-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.ms-chat-window-back {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius);
+  color: var(--text-dim); transition: all 0.12s;
+}
+.ms-chat-window-back:hover { background: var(--card-hover); color: var(--text); }
+.ms-chat-window-name { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-chat-window-messages {
+  flex: 1; overflow-y: auto; padding: 12px; scrollbar-width: thin;
+  max-height: 340px; display: flex; flex-direction: column; gap: 2px;
+}
+.ms-msg { display: flex; gap: 8px; margin-bottom: 6px; align-items: flex-end; }
+.ms-msg.self { flex-direction: row-reverse; }
+.ms-msg-avatar { flex-shrink: 0; }
+.ms-msg-content { display: flex; flex-direction: column; max-width: 78%; min-width: 0; }
+.ms-msg.self .ms-msg-content { align-items: flex-end; }
+.ms-msg-bubble {
+  padding: 8px 12px; border-radius: 14px;
+  font-size: 13px; line-height: 1.45; word-wrap: break-word;
+  white-space: pre-wrap;
+}
+.ms-msg:not(.self) .ms-msg-bubble {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.ms-msg.self .ms-msg-bubble {
+  background: var(--accent); color: white;
+  border-bottom-right-radius: 4px;
+}
+.ms-msg-time { font-size: 10px; color: var(--text-faint); margin-top: 2px; padding: 0 4px; }
+.ms-msg-time.self { text-align: right; }
+.ms-msg-name { font-size: 11px; color: var(--text-dim); font-weight: 600; margin-bottom: 2px; padding: 0 4px; }
+
+/* SUGGESTED REPLY PILLS */
+.ms-suggestions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 12px; border-top: 1px solid var(--border); flex-shrink: 0;
+  align-items: center;
+}
+.ms-sug-pill {
+  padding: 5px 12px; border-radius: 999px; font-size: 12px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent); cursor: pointer; transition: all 0.12s;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ms-sug-pill:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+/* CHAT INPUT */
+.ms-chat-window-input {
+  display: flex; gap: 8px; padding: 10px 12px;
+  border-top: 1px solid var(--border); flex-shrink: 0; align-items: center;
+}
+.ms-chat-window-input input { flex: 1; }
+.ms-chat-send-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--accent); color: white; flex-shrink: 0;
+  transition: all 0.12s;
+}
+.ms-chat-send-btn:hover:not(:disabled) { background: var(--accent-hover); transform: scale(1.05); }
+.ms-chat-send-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ══════════ NOTIFICATION BANNER ══════════ */
+.ms-notif-banner {
+  padding: 14px 16px; border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(14,165,233,0.08), var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  display: flex; flex-direction: column; gap: 10px;
+  animation: fadein 0.2s ease;
+  position: relative; overflow: hidden;
+}
+.ms-notif-banner::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent);
+}
+.ms-notif-banner-content { display: flex; align-items: center; gap: 10px; }
+.ms-notif-banner-text { flex: 1; min-width: 0; }
+.ms-notif-banner-sender { font-weight: 600; font-size: 13px; margin-right: 8px; }
+.ms-notif-banner-body { font-size: 12px; color: var(--text-dim); }
+.ms-notif-suggestions { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 38px; }
+.ms-notif-sug {
+  padding: 5px 12px; border-radius: 999px; font-size: 12px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent); cursor: pointer; transition: all 0.12s;
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ms-notif-sug:hover { background: var(--accent); color: white; border-color: var(--accent); }
+.ms-notif-banner-actions { display: flex; gap: 8px; padding-left: 38px; }
 
