@@ -1,116 +1,164 @@
-# TeamHub
+# AI Colab
 
-A password-protected internal team tool built with Next.js 14 (App Router), TypeScript, and MongoDB Atlas. Includes a Scrum board, password vault, sticky notes, and a collaborative drawing board. All data is shared across all users — no per-user accounts.
+An AI-assisted productivity workspace that brings your **Microsoft 365** world — Outlook mail, Teams chats, Calendar, To-Do — into a single, focused dashboard. It also ships a lightweight suite of collaboration tools (scrum board, sticky notes, freehand drawing, team password vault) so your squad can think, plan, and build together in one place.
+
+![AI Colab dashboard](dashboard.jpg)
+
+---
+
+## Why this exists
+
+Modern work is fragmented: emails in Outlook, conversations in Teams, tasks in To-Do, meetings on the calendar — and the tools your team uses sit in yet another tab. **AI Colab** stitches those feeds together and layers an AI copilot on top so you can:
+
+- See the day at a glance — unread mail, today's events, overdue tasks, latest chats.
+- Reply to a Teams message the moment it arrives, with AI-suggested one-click replies.
+- Draft Outlook emails in the tone you want — the AI writes the body and the subject.
+- Ask an in-app agent to **read your recent emails and chats**, answer questions about them, **create calendar events or todos**, or even **send a Teams message** for you.
+- Collaborate with your team on sticky notes, a drawing canvas, a scrum board, and a shared credentials vault — no more "does anyone have the login?".
+
+---
 
 ## Features
 
-- **🗂 Scrum Board** — manage team members and tasks across Todo / In Progress / Finished columns
-- **🔑 Password Vault** — store credentials per environment (DEV / QA / UAT / STAGING / PROD)
-- **📝 Sticky Notes** — draggable notes on a shared canvas
-- **🎨 Drawing Board** — collaborative infinite canvas with pen, shapes, text, and undo
+### Microsoft 365 dashboard
+- **Live feed** of Outlook inbox, upcoming calendar events, Microsoft To-Do tasks across all lists, and the latest Teams chats — polled every 15 seconds.
+- **Unified stats row** — unread, events today, tasks due today, overdue.
+- **Smart hero** — greets you by name with your avatar pulled from Graph.
+- **AI Insights** — click *Analyze activity* for a plain-English summary of what needs your attention, plus one-click accept buttons for suggested tasks/events extracted from recent mail and chat.
+- **In-app message banner** — when a new Teams message arrives and the dashboard is open, a rich banner appears with the sender, preview, an inline reply box, and AI-generated quick replies. Messages you sent yourself are filtered out so you never get prompted to reply to yourself.
+- **Compose emails with AI** — describe what you want to say; the agent writes a subject + body; you review, tweak, and open it in Outlook.
 
-Near-real-time sync via SWR polling (5s for most sections, 3s for drawing).
+### Floating AI Agent
+A sparkle button at the bottom-right opens a conversational agent that has full context of your recent emails, chats, events, and tasks. It can:
+- Answer questions — *"What did Priya email me about?"*, *"Summarize my latest Teams messages."*
+- Create a task — *"Add a task to finish the report by Friday."*
+- Schedule an event — *"Book 3–4pm tomorrow for a budget review."*
+- Send a Teams message in an existing chat — *"Tell Priya on Teams I'll be 10 min late."*
+
+The agent sees the full back-and-forth transcript of your top chats (not just the last line), so it won't re-send something you already said and won't invent recipients who aren't in your chat list.
+
+### Collaboration tools
+- **Scrum board** — stories, tasks, assignees, statuses, section selector.
+- **Sticky notes canvas** — draggable, colored notes on a shared board.
+- **Drawing canvas** — freehand sketch tool (`perfect-freehand`) for whiteboarding.
+- **Password vault** — shared team credentials behind the same session gate as the rest of the app.
+
+### Security & privacy
+- **JWT-signed session cookie** (`aicolab_token`) guards every `/api/*` route via `middleware.ts`.
+- **Server-side Graph proxy** — all Microsoft Graph calls flow through an internal catch-all route (cheekily named `/api/i-got-you/[...path]`) so the browser's network tab never reveals the upstream URL. It greets casual pokers with a friendly HTTP 418 and a cat emoji.
+- **Groq API key is server-side only** — never ships to the browser. Requests go through `/api/ai/*` routes.
+- MSAL handles Microsoft sign-in via redirect flow; tokens are acquired silently per request.
 
 ---
 
-## Prerequisites
+## Tech stack
 
-- Node.js 18.17+
-- A free MongoDB Atlas account
-
----
-
-## 1. Set up MongoDB Atlas (free tier)
-
-1. Go to [mongodb.com/atlas](https://www.mongodb.com/atlas) and create a free account.
-2. Create a new **M0 (Free)** cluster — pick any cloud/region.
-3. In **Database Access**, create a database user with a username and password (write down the password).
-4. In **Network Access**, click **Add IP Address** → **Allow access from anywhere** (`0.0.0.0/0`). This is required so Vercel serverless functions can reach the cluster.
-5. Once the cluster is ready, click **Connect → Drivers**, pick Node.js, and copy the connection string. It looks like:
-   ```
-   mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-   ```
-   Replace `<user>` and `<password>` with your DB user credentials.
-
-Collections (`users`, `tasks`, `passwords`, `notes`, `drawing`) are created automatically on first use — no migrations needed.
+- **Next.js 14** (App Router) · React 18 · TypeScript
+- **MSAL Browser** for Microsoft 365 sign-in
+- **Microsoft Graph v1.0** for Mail, Calendar, Teams chats, To-Do, user search
+- **Groq** (Llama 3.3 70B by default) for AI drafting, suggestions, and the agent
+- **MongoDB** for collaboration data (notes, tasks, credentials)
+- **jose** for JWT session tokens
+- **SWR** for client-side data fetching in collaboration modules
 
 ---
 
-## 2. Local development
+## Getting started
+
+### Prerequisites
+- Node.js 18+
+- A MongoDB connection string (local or Atlas)
+- An Azure AD app registration with delegated permissions: `Mail.Read`, `Calendars.ReadWrite`, `Chat.Read`, `Chat.ReadBasic`, `Chat.ReadWrite`, `Tasks.ReadWrite`, `User.Read`
+- A Groq API key (free tier works)
+
+### Setup
 
 ```bash
+git clone <this-repo>
+cd letsColab
 npm install
-cp .env.local.example .env.local
 ```
 
-Edit `.env.local`:
+Create `.env.local` at the project root:
 
-```
-APP_PASSWORD=pickanypassword
-MONGODB_URI=mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+```env
+# Microsoft 365
+NEXT_PUBLIC_MS_CLIENT_ID=<your azure app client id>
+NEXT_PUBLIC_MS_TENANT_ID=<your tenant id>
+
+# Groq
+GROQ_API_KEY=<your groq key>
+GROQ_MODEL=llama-3.3-70b-versatile
+
+# Session
+JWT_SECRET=<any long random string>
+
+# MongoDB
+MONGODB_URI=<your mongo connection string>
 ```
 
-Run the dev server:
+Then:
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), enter the password you set, and you're in.
+Open <http://localhost:3000>.
+
+### Azure AD redirect URI
+
+In your Azure app registration, add `http://localhost:3000/auth-callback` as a **Single-page application** redirect URI. Add your production URL the same way when you deploy.
 
 ---
 
-## 3. Deploy to Vercel
-
-1. Push this repo to GitHub.
-2. Go to [vercel.com](https://vercel.com), import the repo.
-3. In **Settings → Environment Variables**, add:
-   - `APP_PASSWORD` — the team password
-   - `MONGODB_URI` — the Atlas connection string
-4. Click **Deploy**. Vercel will build and host it on a free `*.vercel.app` URL.
-
-> Make sure `0.0.0.0/0` is whitelisted in Atlas Network Access — Vercel functions use dynamic IPs.
-
----
-
-## Architecture notes
-
-- `lib/mongodb.ts` caches the MongoClient on `global._mongoClientPromise` to avoid connection-pool exhaustion in serverless.
-- All API routes are server-only and live under `app/api/`.
-- The password gate is purely a frontend convenience — `localStorage.teamhub_auth=true` after `/api/auth/verify` succeeds. There is intentionally **no auth on the API routes** (the spec calls for fully transparent shared data).
-- SWR polls every 5 seconds for users / tasks / passwords / notes; the drawing board polls every 3 seconds and merges by replacing local shapes with server state.
-- Drawing undo (Ctrl+Z) is local-only (50-step history) — undo does not propagate to other users.
-- The drawing collection always holds exactly one document; routes use `findOne()` and `updateOne({}, ..., { upsert: true })`.
-
----
-
-## Project structure
+## Project layout
 
 ```
 app/
-  api/                  ← REST routes
-  (protected)/          ← layout enforces localStorage auth
-    scrum/page.tsx
-    passwords/page.tsx
-    notes/page.tsx
-    drawing/page.tsx
-  page.tsx              ← password gate
-  layout.tsx
-  globals.css
+├── (protected)/            # Routes gated by the JWT cookie
+│   ├── dashboard/          # Microsoft 365 hub + AI agent
+│   ├── scrum/              # Scrum board
+│   ├── notes/              # Sticky-note canvas
+│   ├── drawing/            # Freehand drawing
+│   └── passwords/          # Team password vault
+├── api/
+│   ├── ai/                 # Groq-backed AI endpoints
+│   │   ├── agent/          # Conversational agent (answer / task / event / teams_message)
+│   │   ├── draft-email/    # Compose an Outlook email
+│   │   ├── insights/       # Analyze recent activity
+│   │   └── suggest-replies/# Quick-reply pills for Teams
+│   ├── auth/               # JWT issue / verify / logout
+│   └── i-got-you/          # Microsoft Graph proxy (hides upstream URL)
+├── auth-callback/          # MSAL redirect handler
+├── layout.tsx
+└── page.tsx
 components/
-  layout/   scrum/   passwords/   notes/   drawing/   ui/
+├── layout/                 # Header, sidebar, icons
+├── scrum/ · notes/ · drawing/ · passwords/ · theme/ · ui/
 lib/
-  mongodb.ts  auth.ts  fetcher.ts  types.ts
-hooks/
-  useAuth.ts  useToast.ts
+├── msal.ts · auth.ts · token.ts · mongodb.ts · types.ts · fetcher.ts
+middleware.ts               # Guards /api/* with JWT
 ```
 
 ---
 
 ## Scripts
 
-```bash
-npm run dev      # local dev
-npm run build    # production build
-npm run start    # run production build
-```
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the Next dev server |
+| `npm run build` | Production build |
+| `npm start` | Serve the production build |
+| `npm run lint` | Run Next/ESLint |
+
+---
+
+## A note on the `/api/i-got-you` endpoint
+
+If you ever peek at the network tab and wonder why there's a route called "i-got-you" relaying every Graph request — that's the server-side proxy. It hides `graph.microsoft.com` from browser devtools and greets curious visitors with a friendly HTTP 418 and a cat emoji. It doesn't add new privileges; it just scrubs the upstream URL.
+
+---
+
+## License
+
+Private / internal project. All rights reserved by the authors.

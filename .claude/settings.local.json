@@ -3,7 +3,8 @@
     "allow": [
       "Bash(ls s:/projects/letsColab/.env* s:/projects/letsColab/.gitignore)",
       "Bash(npm install:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(ls s:/projects/letsColab/*.jpg s:/projects/letsColab/*.png)"
     ]
   }
 }

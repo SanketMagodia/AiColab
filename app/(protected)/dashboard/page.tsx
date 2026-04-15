@@ -118,14 +118,8 @@ export default function DashboardPage() {
   const [agentLoading, setAgentLoading] = useState(false);
   const agentEndRef = useRef<HTMLDivElement>(null);
 
-  // Toast (sent confirmations, etc.)
-  const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
-  const toastTimer = useRef<number | null>(null);
-  const showToast = useCallback((title: string, body: string) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    setToast({ title, body });
-    toastTimer.current = window.setTimeout(() => setToast(null), 3500);
-  }, []);
+  // No-op stub kept so existing call sites compile; toast UI removed per user request.
+  const showToast = useCallback((_title: string, _body: string) => {}, []);
 
   // Email compose
   const [emailReplyMode, setEmailReplyMode] = useState(false);
@@ -913,15 +907,6 @@ export default function DashboardPage() {
             </button>
             <button className="btn-ghost" onClick={() => { setNotifPrompt(null); setNotifSuggestions([]); setNotifReplyText(""); }}>Dismiss</button>
           </div>
-        </div>
-      )}
-
-      {/* ── TOAST ── */}
-      {toast && (
-        <div className="ms-toast" role="status" aria-live="polite">
-          <div className="ms-toast-app"><SparklesIcon size={11} /> AI Colab</div>
-          <div className="ms-toast-title">{toast.title}</div>
-          <div className="ms-toast-body">{toast.body}</div>
         </div>
       )}
 
