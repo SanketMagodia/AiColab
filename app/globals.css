@@ -1428,11 +1428,32 @@ html[data-theme="light"] .drawing-style-popover {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
   background: var(--accent);
 }
-.ms-notif-banner-content { display: flex; align-items: center; gap: 10px; }
-.ms-notif-banner-text { flex: 1; min-width: 0; }
-.ms-notif-banner-sender { font-weight: 600; font-size: 13px; margin-right: 8px; }
-.ms-notif-banner-body { font-size: 12px; color: var(--text-dim); }
-.ms-notif-suggestions { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 38px; }
+.ms-notif-banner-head {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.ms-notif-app-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--accent); color: white;
+  font-weight: 700; letter-spacing: 0.4px;
+}
+.ms-notif-app-kind { color: var(--text-dim); }
+.ms-notif-banner-content { display: flex; align-items: flex-start; gap: 10px; }
+.ms-notif-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ms-notif-banner-sender { font-weight: 600; font-size: 13px; }
+.ms-notif-banner-body { font-size: 12px; color: var(--text-dim); word-break: break-word; }
+.ms-notif-reply-row { display: flex; gap: 8px; align-items: center; padding-left: 38px; }
+.ms-notif-reply-input {
+  flex: 1; padding: 8px 12px; border-radius: var(--radius-md);
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); font-size: 13px; outline: none;
+  transition: border-color 0.12s;
+}
+.ms-notif-reply-input:focus { border-color: var(--accent); }
+.ms-notif-suggestions { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 38px; align-items: center; }
+.ms-notif-sug-label { font-size: 11px; color: var(--text-dim); margin-right: 4px; }
 .ms-notif-sug {
   padding: 5px 12px; border-radius: 999px; font-size: 12px;
   background: var(--accent-soft);
@@ -1442,4 +1463,104 @@ html[data-theme="light"] .drawing-style-popover {
 }
 .ms-notif-sug:hover { background: var(--accent); color: white; border-color: var(--accent); }
 .ms-notif-banner-actions { display: flex; gap: 8px; padding-left: 38px; }
+
+/* TOAST */
+.ms-toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+  min-width: 260px; max-width: 380px;
+  padding: 12px 14px 12px 16px; border-radius: var(--radius-lg);
+  background: var(--card); color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  display: flex; flex-direction: column; gap: 3px;
+  animation: fadein 0.2s ease;
+  position: fixed;
+}
+.ms-toast::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent); border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+}
+.ms-toast-app {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--accent);
+}
+.ms-toast-title { font-size: 13px; font-weight: 600; }
+.ms-toast-body { font-size: 12px; color: var(--text-dim); word-break: break-word; }
+
+/* FLOATING AGENT */
+.ms-agent-fab {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9998;
+  width: 54px; height: 54px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #7c3aed));
+  color: white; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 28px rgba(14, 165, 233, 0.45);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.ms-agent-fab:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 14px 32px rgba(14, 165, 233, 0.55); }
+.ms-agent-fab.open { transform: rotate(90deg); }
+.ms-agent-panel {
+  position: fixed; bottom: 92px; right: 24px; z-index: 9998;
+  width: 380px; max-width: calc(100vw - 48px); height: 520px; max-height: calc(100vh - 120px);
+  border-radius: var(--radius-lg);
+  background: var(--card); border: 1px solid var(--border);
+  box-shadow: 0 24px 56px rgba(0,0,0,0.35);
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: fadein 0.18s ease;
+}
+.ms-agent-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(14,165,233,0.12), transparent);
+}
+.ms-agent-head-title { display: flex; align-items: center; gap: 8px; }
+.ms-agent-head-sub { font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.ms-agent-close { padding: 4px 6px; }
+.ms-agent-body {
+  flex: 1; overflow-y: auto; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.ms-agent-empty {
+  padding: 12px; border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.ms-agent-empty-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.ms-agent-empty-list { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px; }
+.ms-agent-msg { display: flex; }
+.ms-agent-msg-user { justify-content: flex-end; }
+.ms-agent-msg-assistant { justify-content: flex-start; }
+.ms-agent-msg-bubble {
+  max-width: 80%; padding: 8px 12px; border-radius: 14px;
+  font-size: 13px; line-height: 1.4; word-break: break-word; white-space: pre-wrap;
+}
+.ms-agent-msg-user .ms-agent-msg-bubble {
+  background: var(--accent); color: white; border-bottom-right-radius: 4px;
+}
+.ms-agent-msg-assistant .ms-agent-msg-bubble {
+  background: var(--accent-soft); color: var(--text);
+  border: 1px solid var(--border); border-bottom-left-radius: 4px;
+}
+.ms-agent-thinking { display: inline-flex; gap: 4px; padding: 10px 14px; }
+.ms-agent-thinking span {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim);
+  animation: agentdots 1.2s infinite ease-in-out;
+}
+.ms-agent-thinking span:nth-child(2) { animation-delay: 0.15s; }
+.ms-agent-thinking span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes agentdots {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+.ms-agent-input-row {
+  display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border);
+  align-items: center;
+}
+.ms-agent-input {
+  flex: 1; padding: 8px 12px; border-radius: var(--radius-md);
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); font-size: 13px; outline: none;
+}
+.ms-agent-input:focus { border-color: var(--accent); }
 

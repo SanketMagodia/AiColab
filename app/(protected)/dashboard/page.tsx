@@ -52,7 +52,7 @@ const isHL = (t?: string, sender?: string) => {
   if (sender && HIGHLIGHT.some(h => sender.toLowerCase().includes(h))) return false;
   return HIGHLIGHT.some(h => t.toLowerCase().includes(h));
 };
-const POLL = 60_000;
+const POLL = 15_000;
 const strip = (html?: string): string => {
   if (!html) return "";
   if (typeof window === "undefined") return html.replace(/<[^>]+>/g, "");
@@ -107,6 +107,25 @@ export default function DashboardPage() {
   const [notifPrompt, setNotifPrompt] = useState<{ chatId: string; sender: string; body: string } | null>(null);
   const [notifSuggestions, setNotifSuggestions] = useState<string[]>([]);
   const [notifSugLoading, setNotifSugLoading] = useState(false);
+  const [notifReplyText, setNotifReplyText] = useState("");
+  const [notifSending, setNotifSending] = useState(false);
+
+  // Floating agent chatbot
+  const [agentOpen, setAgentOpen] = useState(false);
+  type AgentMsg = { role: "user" | "assistant"; text: string };
+  const [agentMessages, setAgentMessages] = useState<AgentMsg[]>([]);
+  const [agentInput, setAgentInput] = useState("");
+  const [agentLoading, setAgentLoading] = useState(false);
+  const agentEndRef = useRef<HTMLDivElement>(null);
+
+  // Toast (sent confirmations, etc.)
+  const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const showToast = useCallback((title: string, body: string) => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    setToast({ title, body });
+    toastTimer.current = window.setTimeout(() => setToast(null), 3500);
+  }, []);
 
   // Email compose
   const [emailReplyMode, setEmailReplyMode] = useState(false);
@@ -138,8 +157,8 @@ export default function DashboardPage() {
   const seenChats = useRef(new Set<string>());
   const firstLoad = useRef({ email: true, cal: true, tasks: true, chat: true });
 
-  /* ── notifications ── */
-  const notify = useCallback((title: string, body: string) => {
+  /* ── notification ping (sound only — in-app banner handles the visual) ── */
+  const notify = useCallback((_kind: string, _sender: string, _body: string) => {
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const o = ctx.createOscillator(), g = ctx.createGain();
@@ -150,8 +169,6 @@ export default function DashboardPage() {
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
       o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.3);
     } catch { /* noop */ }
-    if ("Notification" in window && Notification.permission === "granted")
-      new Notification(title, { body });
   }, []);
 
   /* ── MSAL init (redirect flow) ── */
@@ -202,7 +219,7 @@ export default function DashboardPage() {
       const d = await graphFetch<{ value: Email[] }>(a,
         "/me/mailFolders/inbox/messages?$top=30&$orderby=receivedDateTime desc&$select=id,subject,bodyPreview,from,receivedDateTime,isRead");
       const msgs = d?.value ?? [];
-      msgs.forEach(m => { if (!seenEmails.current.has(m.id)) { if (!firstLoad.current.email) notify("New Email", `${m.from?.emailAddress?.name}: ${m.subject}`); seenEmails.current.add(m.id); } });
+      msgs.forEach(m => { if (!seenEmails.current.has(m.id)) { if (!firstLoad.current.email) notify("New Email", m.from?.emailAddress?.name || "", m.subject); seenEmails.current.add(m.id); } });
       firstLoad.current.email = false;
       setEmails(msgs); setConnected(true); setErrs(e => ({ ...e, email: "" }));
     } catch (e) { setErrs(p => ({ ...p, email: e instanceof Error ? e.message : "Failed" })); setConnected(false); }
@@ -216,7 +233,7 @@ export default function DashboardPage() {
       const d = await graphFetch<{ value: CalEvent[] }>(a,
         `/me/calendarView?startDateTime=${s.toISOString()}&endDateTime=${e2.toISOString()}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end`);
       const evs = d?.value ?? [];
-      evs.forEach(ev => { if (!seenEvents.current.has(ev.id)) { if (!firstLoad.current.cal) notify("New Event", ev.subject); seenEvents.current.add(ev.id); } });
+      evs.forEach(ev => { if (!seenEvents.current.has(ev.id)) { if (!firstLoad.current.cal) notify("New Event", "", ev.subject); seenEvents.current.add(ev.id); } });
       firstLoad.current.cal = false;
       setEvents(evs); setErrs(p => ({ ...p, cal: "" }));
     } catch (e) { setErrs(p => ({ ...p, cal: e instanceof Error ? e.message : "Failed" })); }
@@ -243,13 +260,16 @@ export default function DashboardPage() {
       const d = await graphFetch<{ value: Chat[] }>(a,
         "/me/chats?$top=20&$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc");
       const cs = (d?.value ?? []).filter(c => c.lastMessagePreview);
+      const myId = a.localAccountId;
       cs.forEach(c => {
         const mid = c.lastMessagePreview!.id || c.id;
         if (!seenChats.current.has(mid)) {
-          if (!firstLoad.current.chat) {
+          const fromId = c.lastMessagePreview!.from?.user?.id;
+          const sentByMe = fromId && myId && fromId === myId;
+          if (!firstLoad.current.chat && !sentByMe) {
             const sender = c.lastMessagePreview!.from?.user?.displayName || "";
             const body = strip(c.lastMessagePreview?.body?.content);
-            notify("New Chat", sender);
+            notify("New Message", sender, body);
             setNotifPrompt({ chatId: c.id, sender, body });
           }
           seenChats.current.add(mid);
@@ -264,7 +284,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!account) return;
-    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
     loadProfile(account);
     refreshAll(account);
     const ids = [
@@ -450,10 +469,12 @@ export default function DashboardPage() {
         method: "POST",
         body: JSON.stringify({ body: { contentType: "text", content: chatMsgText.trim() } }),
       });
+      const sentText = chatMsgText.trim();
       setChatMsgText("");
       setSuggestedReplies([]);
       loadChatMsgs(chatWindowId, false);
       loadChats(account);
+      showToast("Message sent", chatWindowUser ? `to ${chatWindowUser} — ${sentText}` : sentText);
     } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
     finally { setChatSending(false); }
   }
@@ -485,16 +506,21 @@ export default function DashboardPage() {
 
   /* ── Notification reply ── */
   async function sendNotifReply(text: string) {
-    if (!account || !notifPrompt) return;
+    if (!account || !notifPrompt || !text.trim()) return;
+    setNotifSending(true);
+    const recipient = notifPrompt.sender;
     try {
       await graphFetch(account, `/me/chats/${notifPrompt.chatId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ body: { contentType: "text", content: text } }),
+        body: JSON.stringify({ body: { contentType: "text", content: text.trim() } }),
       });
       setNotifPrompt(null);
       setNotifSuggestions([]);
+      setNotifReplyText("");
       loadChats(account);
+      showToast("Message sent", recipient ? `to ${recipient} — ${text.trim()}` : text.trim());
     } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setNotifSending(false); }
   }
 
   function openChatFromNotif() {
@@ -569,13 +595,14 @@ export default function DashboardPage() {
   }
 
   function openInOutlook() {
-    const params = new URLSearchParams();
-    if (emailTo.length) params.set("to", emailTo.join(";"));
-    if (emailCC.length) params.set("cc", emailCC.join(";"));
-    if (emailBCC.length) params.set("bcc", emailBCC.join(";"));
-    if (emailDraftSubject) params.set("subject", emailDraftSubject);
-    if (emailDraftBody) params.set("body", emailDraftBody);
-    window.open(`https://outlook.office365.com/mail/deeplink/compose?${params.toString()}`, "_blank");
+    const parts: string[] = [];
+    const enc = (k: string, v: string) => parts.push(`${k}=${encodeURIComponent(v)}`);
+    if (emailTo.length) enc("to", emailTo.join(";"));
+    if (emailCC.length) enc("cc", emailCC.join(";"));
+    if (emailBCC.length) enc("bcc", emailBCC.join(";"));
+    if (emailDraftSubject) enc("subject", emailDraftSubject);
+    if (emailDraftBody) enc("body", emailDraftBody);
+    window.open(`https://outlook.office365.com/mail/deeplink/compose?${parts.join("&")}`, "_blank");
   }
 
   function copyDraftToClipboard() {
@@ -624,6 +651,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!notifPrompt) return;
     setNotifSuggestions([]);
+    setNotifReplyText("");
     setNotifSugLoading(true);
     fetch("/api/ai/suggest-replies", {
       method: "POST",
@@ -634,10 +662,148 @@ export default function DashboardPage() {
       .then(d => { if (d?.suggestions) setNotifSuggestions(d.suggestions); })
       .catch(() => {})
       .finally(() => setNotifSugLoading(false));
-
-    const t = setTimeout(() => { setNotifPrompt(null); setNotifSuggestions([]); }, 30_000);
-    return () => clearTimeout(t);
   }, [notifPrompt]);
+
+  /* ── Agent chatbot ── */
+  async function sendAgentMessage(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || !account || agentLoading) return;
+    const history = agentMessages.map(m => ({ role: m.role, content: m.text }));
+    setAgentMessages(prev => [...prev, { role: "user", text: trimmed }]);
+    setAgentInput("");
+    setAgentLoading(true);
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const myId = account.localAccountId;
+
+    // Fetch fresh chats + recent transcripts so the agent sees ongoing conversations, not stale state.
+    let freshChats: Chat[] = chats;
+    try {
+      const d = await graphFetch<{ value: Chat[] }>(account,
+        "/me/chats?$top=10&$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc");
+      freshChats = (d?.value ?? []).filter(c => c.lastMessagePreview);
+    } catch { /* fall back to state */ }
+
+    const topChats = freshChats.slice(0, 5);
+    const transcripts = await Promise.all(topChats.map(async c => {
+      try {
+        const d = await graphFetch<{ value: ChatMessage[] }>(account, `/me/chats/${c.id}/messages?$top=8`);
+        const msgs = (d?.value ?? [])
+          .filter(m => m.body?.content && m.from?.user)
+          .reverse()
+          .map(m => ({
+            mine: m.from!.user!.id === myId,
+            sender: m.from!.user!.displayName || "",
+            text: strip(m.body!.content || ""),
+            at: m.createdDateTime || "",
+          }));
+        return { chat: c, msgs };
+      } catch { return { chat: c, msgs: [] as Array<{ mine: boolean; sender: string; text: string; at: string }> }; }
+    }));
+
+    const context = {
+      now: new Date().toISOString(),
+      tz,
+      userName: profile?.displayName || "",
+      emails: emails.slice(0, 10).map(e => ({
+        from: e.from?.emailAddress?.name || e.from?.emailAddress?.address || "",
+        subject: e.subject,
+        preview: e.bodyPreview,
+        received: e.receivedDateTime,
+      })),
+      chats: transcripts.map(({ chat, msgs }) => ({
+        chatId: chat.id,
+        topic: chat.topic,
+        sender: chat.lastMessagePreview?.from?.user?.displayName || "",
+        body: strip(chat.lastMessagePreview?.body?.content || ""),
+        at: chat.lastMessagePreview?.createdDateTime || "",
+        transcript: msgs.map(m => ({ from: m.mine ? "me" : m.sender, text: m.text.slice(0, 300), at: m.at })),
+      })),
+      events: events.slice(0, 10).map(e => ({
+        subject: e.subject, start: e.start.dateTime, end: e.end.dateTime,
+      })),
+      tasks: tasks.slice(0, 15).map(t => ({
+        title: t.title, due: t.dueDateTime?.dateTime, list: t.listName,
+      })),
+    };
+
+    try {
+      const r = await fetch("/api/ai/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: trimmed, history, context }),
+      });
+      const data = await r.json();
+      if (data?.error) {
+        setAgentMessages(prev => [...prev, { role: "assistant", text: `Error: ${data.error}` }]);
+        return;
+      }
+      if (data?.type === "action" && data.action) {
+        const a = data.action;
+        try {
+          if (a.kind === "task") {
+            const listId = newListId || lists[0]?.id;
+            if (!listId) {
+              setAgentMessages(prev => [...prev, { role: "assistant", text: "No todo list found. Create one in To-Do first." }]);
+              return;
+            }
+            const b: Record<string, unknown> = { title: a.title };
+            if (a.due) b.dueDateTime = { dateTime: a.due, timeZone: tz };
+            if (a.notes) b.body = { content: a.notes, contentType: "text" };
+            await graphFetch(account, `/me/todo/lists/${listId}/tasks`, { method: "POST", body: JSON.stringify(b) });
+            loadTasks(account);
+            setAgentMessages(prev => [...prev, { role: "assistant", text: data.text || `Added task "${a.title}".` }]);
+            showToast("Task added", a.title);
+          } else if (a.kind === "teams_message") {
+            const targetChat = chats.find(c => c.id === a.chatId);
+            if (!targetChat) {
+              setAgentMessages(prev => [...prev, { role: "assistant", text: `I couldn't find a matching chat for "${a.recipient || ""}". I can only message people in your recent Teams chats.` }]);
+              return;
+            }
+            if (!a.text?.trim()) {
+              setAgentMessages(prev => [...prev, { role: "assistant", text: "No message content to send." }]);
+              return;
+            }
+            await graphFetch(account, `/me/chats/${a.chatId}/messages`, {
+              method: "POST",
+              body: JSON.stringify({ body: { contentType: "text", content: a.text.trim() } }),
+            });
+            loadChats(account);
+            const who = a.recipient || targetChat.lastMessagePreview?.from?.user?.displayName || targetChat.topic || "chat";
+            setAgentMessages(prev => [...prev, { role: "assistant", text: data.text || `Sent to ${who}: "${a.text.trim()}"` }]);
+            showToast("Message sent", `to ${who} — ${a.text.trim()}`);
+          } else if (a.kind === "event") {
+            await graphFetch(account, "/me/events", {
+              method: "POST",
+              body: JSON.stringify({
+                subject: a.subject,
+                start: { dateTime: a.start, timeZone: tz },
+                end: { dateTime: a.end, timeZone: tz },
+                ...(a.notes ? { body: { contentType: "text", content: a.notes } } : {}),
+              }),
+            });
+            loadCalendar(account);
+            setAgentMessages(prev => [...prev, { role: "assistant", text: data.text || `Added event "${a.subject}".` }]);
+            showToast("Event added", `${a.subject} · ${new Date(a.start).toLocaleString()}`);
+          } else {
+            setAgentMessages(prev => [...prev, { role: "assistant", text: data.text || "Done." }]);
+          }
+        } catch (e) {
+          setAgentMessages(prev => [...prev, { role: "assistant", text: `Couldn't save: ${e instanceof Error ? e.message : "error"}` }]);
+        }
+      } else {
+        setAgentMessages(prev => [...prev, { role: "assistant", text: data.text || "(no reply)" }]);
+      }
+    } catch (e) {
+      setAgentMessages(prev => [...prev, { role: "assistant", text: `Request failed: ${e instanceof Error ? e.message : "error"}` }]);
+    } finally {
+      setAgentLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (agentOpen) agentEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [agentMessages, agentOpen]);
 
   /* ── early states ── */
   if (initError) return (
@@ -704,27 +870,58 @@ export default function DashboardPage() {
       {/* ── NOTIFICATION PROMPT ── */}
       {notifPrompt && (
         <div className="ms-notif-banner">
+          <div className="ms-notif-banner-head">
+            <span className="ms-notif-app-badge"><SparklesIcon size={11} /> AI Colab</span>
+            <span className="ms-notif-app-kind">New message</span>
+          </div>
           <div className="ms-notif-banner-content">
             <div className="ms-avatar ms-avatar-sm">{ini(notifPrompt.sender)}</div>
             <div className="ms-notif-banner-text">
-              <span className="ms-notif-banner-sender">{notifPrompt.sender}</span>
-              <span className="ms-notif-banner-body">{notifPrompt.body.slice(0, 120)}{notifPrompt.body.length > 120 ? "…" : ""}</span>
+              <div className="ms-notif-banner-sender">{notifPrompt.sender || "Unknown sender"}</div>
+              <div className="ms-notif-banner-body">— {notifPrompt.body.slice(0, 160)}{notifPrompt.body.length > 160 ? "…" : ""}</div>
             </div>
           </div>
-          {notifSugLoading && <div className="ms-muted-small" style={{ paddingLeft: 36 }}>Generating reply options…</div>}
+
+          <div className="ms-notif-reply-row">
+            <input
+              className="ms-notif-reply-input"
+              placeholder={`Reply to ${notifPrompt.sender || "message"}…`}
+              value={notifReplyText}
+              onChange={e => setNotifReplyText(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && notifReplyText.trim()) { e.preventDefault(); sendNotifReply(notifReplyText); } }}
+              disabled={notifSending}
+              autoFocus
+            />
+            <button className="btn" onClick={() => sendNotifReply(notifReplyText)} disabled={notifSending || !notifReplyText.trim()}>
+              <SendIcon size={13} /> Send
+            </button>
+          </div>
+
+          {notifSugLoading && <div className="ms-muted-small">Generating reply suggestions…</div>}
           {notifSuggestions.length > 0 && (
             <div className="ms-notif-suggestions">
+              <span className="ms-notif-sug-label">Quick replies:</span>
               {notifSuggestions.map((s, i) => (
-                <button key={i} className="ms-sug-pill" onClick={() => sendNotifReply(s)} title={s}>{s}</button>
+                <button key={i} className="ms-sug-pill" onClick={() => sendNotifReply(s)} disabled={notifSending} title={s}>{s}</button>
               ))}
             </div>
           )}
+
           <div className="ms-notif-banner-actions">
-            <button className="btn" onClick={openChatFromNotif}>
-              <ReplyIcon size={13} /> Reply
+            <button className="btn-ghost" onClick={openChatFromNotif}>
+              <ReplyIcon size={13} /> Open chat
             </button>
-            <button className="btn-ghost" onClick={() => { setNotifPrompt(null); setNotifSuggestions([]); }}>Dismiss</button>
+            <button className="btn-ghost" onClick={() => { setNotifPrompt(null); setNotifSuggestions([]); setNotifReplyText(""); }}>Dismiss</button>
           </div>
+        </div>
+      )}
+
+      {/* ── TOAST ── */}
+      {toast && (
+        <div className="ms-toast" role="status" aria-live="polite">
+          <div className="ms-toast-app"><SparklesIcon size={11} /> AI Colab</div>
+          <div className="ms-toast-title">{toast.title}</div>
+          <div className="ms-toast-body">{toast.body}</div>
         </div>
       )}
 
@@ -1217,6 +1414,70 @@ export default function DashboardPage() {
           </div>
         );
       })()}
+
+      {/* ── FLOATING AGENT CHATBOT ── */}
+      {agentOpen && (
+        <div className="ms-agent-panel">
+          <div className="ms-agent-head">
+            <div className="ms-agent-head-title">
+              <span className="ms-notif-app-badge"><SparklesIcon size={11} /> AI Colab</span>
+              <span className="ms-agent-head-sub">Agent</span>
+            </div>
+            <button className="btn-ghost ms-agent-close" onClick={() => setAgentOpen(false)} title="Close">
+              <XIcon size={14} />
+            </button>
+          </div>
+          <div className="ms-agent-body">
+            {agentMessages.length === 0 && (
+              <div className="ms-agent-empty">
+                <div className="ms-agent-empty-title">Hi {profile?.givenName || "there"}! I can help with:</div>
+                <ul className="ms-agent-empty-list">
+                  <li>&quot;Add a task to finish the report by Friday&quot;</li>
+                  <li>&quot;Schedule a meeting tomorrow 3-4pm about budget&quot;</li>
+                  <li>&quot;Tell Priya on Teams I&apos;ll be 10 min late&quot;</li>
+                  <li>&quot;What did Priya email me about?&quot;</li>
+                  <li>&quot;Summarize my latest Teams messages&quot;</li>
+                </ul>
+              </div>
+            )}
+            {agentMessages.map((m, i) => (
+              <div key={i} className={`ms-agent-msg ms-agent-msg-${m.role}`}>
+                <div className="ms-agent-msg-bubble">{m.text}</div>
+              </div>
+            ))}
+            {agentLoading && (
+              <div className="ms-agent-msg ms-agent-msg-assistant">
+                <div className="ms-agent-msg-bubble ms-agent-thinking">
+                  <span /><span /><span />
+                </div>
+              </div>
+            )}
+            <div ref={agentEndRef} />
+          </div>
+          <div className="ms-agent-input-row">
+            <input
+              className="ms-agent-input"
+              placeholder="Ask or create a task/event…"
+              value={agentInput}
+              onChange={e => setAgentInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAgentMessage(agentInput); } }}
+              disabled={agentLoading}
+              autoFocus
+            />
+            <button className="ms-chat-send-btn" onClick={() => sendAgentMessage(agentInput)} disabled={agentLoading || !agentInput.trim()} title="Send">
+              <SendIcon size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+      <button
+        className={`ms-agent-fab${agentOpen ? " open" : ""}`}
+        onClick={() => setAgentOpen(o => !o)}
+        title={agentOpen ? "Close AI agent" : "Open AI agent"}
+        aria-label="AI agent"
+      >
+        {agentOpen ? <XIcon size={18} /> : <SparklesIcon size={18} />}
+      </button>
     </div>
   );
 }

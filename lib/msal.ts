@@ -21,7 +21,7 @@ export const MS_SCOPES = [
   "ChannelMessage.ReadWrite",
 ];
 
-export const GRAPH = "https://graph.microsoft.com/v1.0";
+export const GRAPH = "/api/i-got-you";
 
 let app: PublicClientApplication | null = null;
 let boot: Promise<PublicClientApplication> | null = null;
