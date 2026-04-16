@@ -528,7 +528,7 @@ export default function DashboardPage() {
   }
 
   function openChatFromList(chat: Chat) {
-    const sender = chat.lastMessagePreview?.from?.user?.displayName || chat.topic || "Chat";
+    const sender = chatContactNames.current[chat.id] || chat.topic || chat.lastMessagePreview?.from?.user?.displayName || "Chat";
     setChatWindowId(chat.id);
     setChatWindowUser(sender);
     setChatView("chat");
