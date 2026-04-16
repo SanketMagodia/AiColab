@@ -11,6 +11,8 @@ const TENANT_ID = process.env.NEXT_PUBLIC_MS_TENANT_ID ?? "";
 
 export const MS_SCOPES = [
   "Mail.Read",
+  "Mail.Send",
+  "Mail.ReadWrite",
   "Calendars.Read",
   "Calendars.ReadWrite",
   "Chat.Read",
@@ -86,7 +88,9 @@ export async function graphFetch<T = unknown>(
     const t = await r.text().catch(() => r.statusText);
     throw new Error(`Graph ${r.status}: ${t}`);
   }
-  if (r.status === 204) return null as T;
+  // 204 No Content and 202 Accepted (e.g. sendMail) both return empty bodies
+  const ct = r.headers.get("content-type") ?? "";
+  if (r.status === 204 || r.status === 202 || !ct.includes("json")) return null as T;
   return r.json();
 }
 

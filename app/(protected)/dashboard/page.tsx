@@ -17,8 +17,10 @@ type Email = {
 type CalEvent = { id: string; subject: string; start: { dateTime: string }; end: { dateTime: string } };
 type TodoList = { id: string; displayName: string };
 type TodoTask = { id: string; title: string; status: string; dueDateTime?: { dateTime: string }; listId: string; listName: string };
+type ChatMember = { id: string; displayName?: string; userId?: string };
 type Chat = {
   id: string; topic?: string;
+  members?: ChatMember[];
   lastMessagePreview?: { id?: string; createdDateTime?: string; body?: { content?: string }; from?: { user?: { displayName?: string; id?: string } } };
 };
 type ChatMessage = {
@@ -132,6 +134,8 @@ export default function DashboardPage() {
   const [emailBCC, setEmailBCC] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [draftGenerating, setDraftGenerating] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSavingDraft, setEmailSavingDraft] = useState(false);
 
   // AI insights
   type AIAction =
@@ -150,6 +154,45 @@ export default function DashboardPage() {
   const seenEvents = useRef(new Set<string>());
   const seenChats = useRef(new Set<string>());
   const firstLoad = useRef({ email: true, cal: true, tasks: true, chat: true });
+  const chatContactNames = useRef<Record<string, string>>({});
+
+  // ── Auto-triage ──
+  type TriageLabel = "urgent" | "action" | "fyi" | "newsletter";
+  const [triageMap, setTriageMap] = useState<Record<string, TriageLabel>>({});
+  const triagedIdsRef = useRef(new Set<string>());
+
+  // ── Email → Task pipeline ──
+  type EmailTask = { title: string; due?: string | null; reason: string };
+  const [emailTasksMap, setEmailTasksMap] = useState<Record<string, EmailTask[]>>({});
+  const [emailTasksLoading, setEmailTasksLoading] = useState(false);
+  const [emailTaskAdding, setEmailTaskAdding] = useState<string | null>(null);
+  const extractedIdsRef = useRef(new Set<string>());
+
+  // ── Meeting prep ──
+  type PrepData = { summary: string; points: string[]; questions: string[]; actions: string[] };
+  const [prepMap, setPrepMap] = useState<Record<string, PrepData>>({});
+  const [prepLoading, setPrepLoading] = useState(false);
+  const [prepOpenId, setPrepOpenId] = useState<string | null>(null);
+
+  // ── Workflow trigger rules ──
+  type TriggerRule = {
+    id: string; name: string; enabled: boolean;
+    condField: "from" | "subject" | "preview";
+    condValue: string;
+    actionType: "urgent" | "label";
+    actionValue: string;
+  };
+  const rulesRef = useRef<TriggerRule[]>([]);
+  const [rules, setRules] = useState<TriggerRule[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(localStorage.getItem("aicolab_rules") ?? "[]"); } catch { return []; }
+  });
+  const [showRulesPanel, setShowRulesPanel] = useState(false);
+  const [ruleLabelsMap, setRuleLabelsMap] = useState<Record<string, string>>({});
+  const [ruleForm, setRuleForm] = useState({
+    name: "", condField: "from" as "from" | "subject" | "preview",
+    condValue: "", actionType: "urgent" as "urgent" | "label", actionValue: "",
+  });
 
   /* ── notification ping (sound only — in-app banner handles the visual) ── */
   const notify = useCallback((_kind: string, _sender: string, _body: string) => {
@@ -208,6 +251,55 @@ export default function DashboardPage() {
     } catch { /* non-critical */ }
   }, []);
 
+  const runTriage = useCallback(async (newEmails: Email[]) => {
+    const fresh = newEmails.filter(e => !triagedIdsRef.current.has(e.id));
+    if (!fresh.length) return;
+    fresh.forEach(e => triagedIdsRef.current.add(e.id));
+    try {
+      const r = await fetch("/api/ai/triage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emails: fresh.map(e => ({
+            id: e.id, subject: e.subject, preview: e.bodyPreview,
+            sender: e.from?.emailAddress?.name || e.from?.emailAddress?.address || "",
+            receivedAt: e.receivedDateTime,
+          })),
+        }),
+      });
+      const data = await r.json();
+      if (Array.isArray(data?.triage)) {
+        const map: Record<string, TriageLabel> = {};
+        (data.triage as { id: string; label: string }[]).forEach(t => { map[t.id] = t.label as TriageLabel; });
+        setTriageMap(prev => ({ ...prev, ...map }));
+      }
+    } catch { /* triage is best-effort */ }
+  }, []);
+
+  const applyRules = useCallback((newEmails: Email[]) => {
+    const current = rulesRef.current;
+    if (!current.length) return;
+    const urgentIds: string[] = [];
+    const labels: Record<string, string> = {};
+    for (const email of newEmails) {
+      for (const rule of current) {
+        if (!rule.enabled || !rule.condValue) continue;
+        const field = rule.condField === "from"
+          ? (email.from?.emailAddress?.name || email.from?.emailAddress?.address || "")
+          : rule.condField === "subject" ? email.subject : email.bodyPreview;
+        if (!field.toLowerCase().includes(rule.condValue.toLowerCase())) continue;
+        if (rule.actionType === "urgent") urgentIds.push(email.id);
+        else if (rule.actionType === "label" && rule.actionValue) labels[email.id] = rule.actionValue;
+      }
+    }
+    if (urgentIds.length) setTriageMap(prev => {
+      const next = { ...prev };
+      urgentIds.forEach(id => { next[id] = "urgent"; });
+      return next;
+    });
+    if (Object.keys(labels).length) setRuleLabelsMap(prev => ({ ...prev, ...labels }));
+  }, []);
+
   const loadEmails = useCallback(async (a: AccountInfo) => {
     try {
       const d = await graphFetch<{ value: Email[] }>(a,
@@ -216,8 +308,10 @@ export default function DashboardPage() {
       msgs.forEach(m => { if (!seenEmails.current.has(m.id)) { if (!firstLoad.current.email) notify("New Email", m.from?.emailAddress?.name || "", m.subject); seenEmails.current.add(m.id); } });
       firstLoad.current.email = false;
       setEmails(msgs); setConnected(true); setErrs(e => ({ ...e, email: "" }));
+      runTriage(msgs);
+      applyRules(msgs);
     } catch (e) { setErrs(p => ({ ...p, email: e instanceof Error ? e.message : "Failed" })); setConnected(false); }
-  }, [notify]);
+  }, [notify, runTriage, applyRules]);
 
   const loadCalendar = useCallback(async (a: AccountInfo) => {
     try {
@@ -252,13 +346,23 @@ export default function DashboardPage() {
   const loadChats = useCallback(async (a: AccountInfo) => {
     try {
       const d = await graphFetch<{ value: Chat[] }>(a,
-        "/me/chats?$top=20&$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc");
+        "/me/chats?$top=20&$expand=lastMessagePreview,members&$orderby=lastMessagePreview/createdDateTime desc");
       const cs = (d?.value ?? []).filter(c => c.lastMessagePreview);
       const myId = a.localAccountId;
       cs.forEach(c => {
+        // Primary source: members list — reliable even when user sent the last message
+        if (c.members?.length) {
+          const other = c.members.find(m => m.userId !== myId && m.id !== myId);
+          if (other?.displayName) chatContactNames.current[c.id] = other.displayName;
+        }
+        // Fallback: remember non-me sender from last message preview
+        const fromId = c.lastMessagePreview?.from?.user?.id;
+        if (fromId && fromId !== myId) {
+          const name = c.lastMessagePreview?.from?.user?.displayName;
+          if (name) chatContactNames.current[c.id] = name;
+        }
         const mid = c.lastMessagePreview!.id || c.id;
         if (!seenChats.current.has(mid)) {
-          const fromId = c.lastMessagePreview!.from?.user?.id;
           const sentByMe = fromId && myId && fromId === myId;
           if (!firstLoad.current.chat && !sentByMe) {
             const sender = c.lastMessagePreview!.from?.user?.displayName || "";
@@ -299,10 +403,18 @@ export default function DashboardPage() {
     if (!emailBodies[id] && account) {
       try {
         const msg = await graphFetch<{ body?: { content?: string; contentType?: string } }>(account, `/me/messages/${id}?$select=body`);
-        setEmailBodies(b => ({ ...b, [id]: msg?.body?.content || "<p>(no body)</p>" }));
+        const bodyContent = msg?.body?.content || "<p>(no body)</p>";
+        setEmailBodies(b => ({ ...b, [id]: bodyContent }));
         if (wasUnread) {
           await graphFetch(account, `/me/messages/${id}`, { method: "PATCH", body: JSON.stringify({ isRead: true }) });
           setEmails(prev => prev.map(m => m.id === id ? { ...m, isRead: true } : m));
+        }
+        // Extract action items from email body
+        if (!extractedIdsRef.current.has(id)) {
+          extractedIdsRef.current.add(id);
+          const email = emails.find(e => e.id === id);
+          const sender = email?.from?.emailAddress?.name || email?.from?.emailAddress?.address || "";
+          extractTasksFromEmail(id, email?.subject || "", sender, bodyContent);
         }
       } catch (e) { setEmailBodies(b => ({ ...b, [id]: `<p>Error: ${e instanceof Error ? e.message : "failed"}</p>` })); }
     }
@@ -602,6 +714,149 @@ export default function DashboardPage() {
   function copyDraftToClipboard() {
     const text = `To: ${emailTo.join("; ")}\n${emailCC.length ? `CC: ${emailCC.join("; ")}\n` : ""}${emailBCC.length ? `BCC: ${emailBCC.join("; ")}\n` : ""}Subject: ${emailDraftSubject}\n\n${emailDraftBody}`;
     navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  function buildRecipients(addrs: string[]) {
+    return addrs.map(a => ({ emailAddress: { address: a } }));
+  }
+
+  async function sendEmail() {
+    if (!account || !emailTo.length || !emailDraftBody.trim()) return;
+    setEmailSending(true);
+    try {
+      await graphFetch(account, "/me/sendMail", {
+        method: "POST",
+        body: JSON.stringify({
+          message: {
+            subject: emailDraftSubject,
+            body: { contentType: "Text", content: emailDraftBody },
+            toRecipients: buildRecipients(emailTo),
+            ccRecipients: buildRecipients(emailCC),
+            bccRecipients: buildRecipients(emailBCC),
+          },
+          saveToSentItems: true,
+        }),
+      });
+      closeEmailModal();
+    } catch (e) { alert(`Send failed: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setEmailSending(false); }
+  }
+
+  async function saveDraft() {
+    if (!account) return;
+    setEmailSavingDraft(true);
+    try {
+      await graphFetch(account, "/me/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          subject: emailDraftSubject,
+          body: { contentType: "Text", content: emailDraftBody },
+          toRecipients: buildRecipients(emailTo),
+          ccRecipients: buildRecipients(emailCC),
+          bccRecipients: buildRecipients(emailBCC),
+        }),
+      });
+      closeEmailModal();
+    } catch (e) { alert(`Save draft failed: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setEmailSavingDraft(false); }
+  }
+
+  /* ── Email → Task pipeline ── */
+  async function extractTasksFromEmail(id: string, subject: string, sender: string, bodyHtml: string) {
+    setEmailTasksLoading(true);
+    try {
+      const r = await fetch("/api/ai/extract-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, sender, body: strip(bodyHtml).slice(0, 3000) }),
+      });
+      const data = await r.json();
+      setEmailTasksMap(prev => ({ ...prev, [id]: Array.isArray(data?.tasks) ? data.tasks : [] }));
+    } catch {
+      setEmailTasksMap(prev => ({ ...prev, [id]: [] }));
+    } finally {
+      setEmailTasksLoading(false);
+    }
+  }
+
+  async function addEmailTask(task: EmailTask, emailId: string) {
+    if (!account) return;
+    const listId = newListId || lists[0]?.id;
+    if (!listId) { alert("No task list available"); return; }
+    setEmailTaskAdding(task.title);
+    try {
+      const b: Record<string, unknown> = { title: task.title };
+      if (task.due) b.dueDateTime = { dateTime: task.due + "T00:00:00", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+      await graphFetch(account, `/me/todo/lists/${listId}/tasks`, { method: "POST", body: JSON.stringify(b) });
+      loadTasks(account);
+      setEmailTasksMap(prev => ({ ...prev, [emailId]: (prev[emailId] ?? []).filter(t => t.title !== task.title) }));
+    } catch (e) { alert(`Failed: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setEmailTaskAdding(null); }
+  }
+
+  /* ── Meeting prep ── */
+  async function loadMeetingPrep(event: CalEvent) {
+    if (prepMap[event.id]) { setPrepOpenId(prepOpenId === event.id ? null : event.id); return; }
+    setPrepOpenId(event.id);
+    setPrepLoading(true);
+    const kw = event.subject.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const relEmails = emails.filter(e =>
+      kw.some(k => e.subject.toLowerCase().includes(k) || e.bodyPreview.toLowerCase().includes(k))
+    ).slice(0, 5);
+    const relChats = chats.filter(c => {
+      const body = strip(c.lastMessagePreview?.body?.content || "").toLowerCase();
+      return kw.some(k => body.includes(k) || (c.topic || "").toLowerCase().includes(k));
+    }).slice(0, 5);
+    try {
+      const r = await fetch("/api/ai/meeting-prep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: { subject: event.subject, start: event.start.dateTime, end: event.end.dateTime },
+          emails: relEmails.map(e => ({ from: e.from?.emailAddress?.name || e.from?.emailAddress?.address, subject: e.subject, preview: e.bodyPreview })),
+          chats: relChats.map(c => ({ sender: c.lastMessagePreview?.from?.user?.displayName || c.topic || "", body: strip(c.lastMessagePreview?.body?.content || "") })),
+        }),
+      });
+      const data = await r.json();
+      setPrepMap(prev => ({ ...prev, [event.id]: data as PrepData }));
+    } catch {
+      setPrepMap(prev => ({ ...prev, [event.id]: { summary: "Prep failed to load.", points: [], questions: [], actions: [] } }));
+    } finally {
+      setPrepLoading(false);
+    }
+  }
+
+  /* ── Workflow rules CRUD ── */
+  // Keep rulesRef in sync so applyRules callback stays stable
+  useEffect(() => { rulesRef.current = rules; }, [rules]);
+
+  function saveRule() {
+    if (!ruleForm.condValue.trim()) return;
+    const r: TriggerRule = {
+      id: Date.now().toString(),
+      name: ruleForm.name.trim() || `Rule ${rules.length + 1}`,
+      enabled: true,
+      condField: ruleForm.condField,
+      condValue: ruleForm.condValue.trim(),
+      actionType: ruleForm.actionType,
+      actionValue: ruleForm.actionValue.trim(),
+    };
+    const updated = [...rules, r];
+    setRules(updated);
+    localStorage.setItem("aicolab_rules", JSON.stringify(updated));
+    setRuleForm({ name: "", condField: "from", condValue: "", actionType: "urgent", actionValue: "" });
+  }
+
+  function deleteRule(id: string) {
+    const updated = rules.filter(r => r.id !== id);
+    setRules(updated);
+    localStorage.setItem("aicolab_rules", JSON.stringify(updated));
+  }
+
+  function toggleRule(id: string) {
+    const updated = rules.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r);
+    setRules(updated);
+    localStorage.setItem("aicolab_rules", JSON.stringify(updated));
   }
 
   /* ── DM search (debounced) ── */
@@ -1017,9 +1272,14 @@ export default function DashboardPage() {
                 </button>
               )}
               {leftTab === "inbox" && (
-                <button className="btn-ghost ms-tab-action" onClick={startComposeNew}>
-                  Compose
-                </button>
+                <>
+                  <button className="btn-ghost ms-tab-action" onClick={() => setShowRulesPanel(v => !v)} title="Automation rules">
+                    ⚡ Rules{rules.filter(r => r.enabled).length > 0 ? ` (${rules.filter(r => r.enabled).length})` : ""}
+                  </button>
+                  <button className="btn-ghost ms-tab-action" onClick={startComposeNew}>
+                    Compose
+                  </button>
+                </>
               )}
             </div>
 
@@ -1109,27 +1369,33 @@ export default function DashboardPage() {
                     <div className="ms-panel-body ms-scroll-body">
                       {errs.chat ? <div className="ms-err">{errs.chat}</div>
                       : (() => {
-                        const inbound = chats.filter(c => {
-                          const fromId = c.lastMessagePreview?.from?.user?.id;
-                          return !fromId || fromId !== myId;
-                        });
-                        if (inbound.length === 0) return <Empty text="No recent chats" />;
-                        return inbound.map(c => {
+                        if (chats.length === 0) return <Empty text="No recent chats" />;
+                        return chats.map(c => {
                           const p = c.lastMessagePreview!;
-                          const sender = p.from?.user?.displayName || c.topic || "Chat";
+                          const lastFromId = p.from?.user?.id;
+                          const sentByMe = !!(lastFromId && myId && lastFromId === myId);
+                          const contactName = chatContactNames.current[c.id] || c.topic || p.from?.user?.displayName || "Chat";
                           const body = strip(p.body?.content);
-                          const hi = isHL(body, sender) || isHL(c.topic, sender);
+                          const hi = !sentByMe && (isHL(body, contactName) || isHL(c.topic, contactName));
                           return (
-                            <div key={c.id} className={`ms-chat${hi ? " mention" : ""}`}
+                            <div key={c.id} className={`ms-chat${hi ? " mention" : ""}${sentByMe ? " ms-chat-sent-last" : ""}`}
                               onClick={() => openChatFromList(c)}>
                               <div className="ms-chat-row">
-                                <div className="ms-avatar ms-avatar-sm">{ini(sender)}</div>
+                                {/* Avatar always shows contact's initials; badge when you sent last */}
+                                <div className="ms-chat-avatar-wrap">
+                                  <div className="ms-avatar ms-avatar-sm">{ini(contactName)}</div>
+                                  {sentByMe && <span className="ms-chat-sent-dot" title="You sent the last message" />}
+                                </div>
                                 <div className="ms-chat-body">
                                   <div className="ms-chat-meta">
-                                    <span className="ms-chat-name">{sender}</span>
+                                    <span className="ms-chat-name">{contactName}</span>
                                     <span className="ms-chat-time">{fmtTime(p.createdDateTime)}</span>
                                   </div>
-                                  <div className="ms-chat-preview">{body}</div>
+                                  <div className="ms-chat-preview">
+                                    {sentByMe
+                                      ? <><span className="ms-chat-you-pill">You</span><span className="ms-chat-you-body">{body}</span></>
+                                      : body}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -1142,20 +1408,98 @@ export default function DashboardPage() {
               </>
             )}
 
+            {/* WORKFLOW RULES PANEL */}
+            {leftTab === "inbox" && showRulesPanel && (
+              <div className="ms-rules-panel">
+                <div className="ms-rules-head">
+                  <span className="ms-rules-title">⚡ Automation Rules</span>
+                  <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowRulesPanel(false)}>Close</button>
+                </div>
+                {rules.length > 0 && (
+                  <div className="ms-rules-list">
+                    {rules.map(r => (
+                      <div key={r.id} className={`ms-rule-row${r.enabled ? "" : " disabled"}`}>
+                        <button className="ms-rule-toggle" onClick={() => toggleRule(r.id)} title={r.enabled ? "Disable" : "Enable"}>
+                          {r.enabled ? "●" : "○"}
+                        </button>
+                        <div className="ms-rule-desc">
+                          <span className="ms-rule-name">{r.name}</span>
+                          <span className="ms-rule-cond">if {r.condField} contains &ldquo;{r.condValue}&rdquo; → {r.actionType === "urgent" ? "mark urgent" : `label "${r.actionValue}"`}</span>
+                        </div>
+                        <button className="ms-rule-del" onClick={() => deleteRule(r.id)} title="Delete">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="ms-rule-form">
+                  <input placeholder="Rule name (optional)" value={ruleForm.name}
+                    onChange={e => setRuleForm(f => ({ ...f, name: e.target.value }))} />
+                  <div className="ms-rule-form-row">
+                    <span className="ms-rule-form-label">If</span>
+                    <select value={ruleForm.condField} onChange={e => setRuleForm(f => ({ ...f, condField: e.target.value as "from" | "subject" | "preview" }))}>
+                      <option value="from">sender</option>
+                      <option value="subject">subject</option>
+                      <option value="preview">preview</option>
+                    </select>
+                    <span className="ms-rule-form-label">contains</span>
+                    <input placeholder="keyword…" value={ruleForm.condValue}
+                      onChange={e => setRuleForm(f => ({ ...f, condValue: e.target.value }))} />
+                  </div>
+                  <div className="ms-rule-form-row">
+                    <span className="ms-rule-form-label">Then</span>
+                    <select value={ruleForm.actionType} onChange={e => setRuleForm(f => ({ ...f, actionType: e.target.value as "urgent" | "label" }))}>
+                      <option value="urgent">mark urgent</option>
+                      <option value="label">add label</option>
+                    </select>
+                    {ruleForm.actionType === "label" && (
+                      <input placeholder="Label text…" value={ruleForm.actionValue}
+                        onChange={e => setRuleForm(f => ({ ...f, actionValue: e.target.value }))} />
+                    )}
+                  </div>
+                  <button className="btn" onClick={saveRule} disabled={!ruleForm.condValue.trim()}>Add Rule</button>
+                </div>
+              </div>
+            )}
+
             {/* INBOX tab */}
             {leftTab === "inbox" && (
               <div className="ms-panel-body ms-scroll-body">
+              <div className="ms-inbox-legend">
+                <div className="ms-legend-section">
+                  <span className="ms-legend-section-title">Row highlight</span>
+                  <span className="ms-legend-dot ms-legend-dot-unread" /><span className="ms-legend-desc">Unread</span>
+                  <span className="ms-legend-dot ms-legend-dot-mention" /><span className="ms-legend-desc">Your name mentioned</span>
+                </div>
+                {Object.keys(triageMap).length > 0 && (
+                  <>
+                    <span className="ms-triage-legend-sep ms-legend-vsep" />
+                    <div className="ms-legend-section">
+                      <span className="ms-legend-section-title">AI triage</span>
+                      <span className="ms-triage-badge ms-triage-urgent">urgent</span><span className="ms-legend-desc">action needed today</span>
+                      <span className="ms-triage-badge ms-triage-action">action</span><span className="ms-legend-desc">reply needed</span>
+                      <span className="ms-triage-badge ms-triage-fyi">fyi</span><span className="ms-legend-desc">read only</span>
+                      <span className="ms-triage-badge ms-triage-newsletter">newsletter</span><span className="ms-legend-desc">bulk mail</span>
+                    </div>
+                  </>
+                )}
+              </div>
                 {errs.email ? <div className="ms-err">{errs.email} <button className="btn-ghost" onClick={() => loadEmails(account)}>Retry</button></div>
                 : emails.length === 0 ? <Empty text="Inbox zero" />
                 : emails.map(m => {
                   const senderName = m.from?.emailAddress?.name || m.from?.emailAddress?.address || "";
                   const hi = isHL(m.subject, senderName) || isHL(m.bodyPreview, senderName);
+                  const triage = triageMap[m.id];
+                  const ruleLabel = ruleLabelsMap[m.id];
                   return (
                     <div key={m.id} className={`ms-email${!m.isRead ? " unread" : ""}${hi ? " mention" : ""}`}
                       onClick={() => openEmail(m.id, !m.isRead)}>
                       <div className="ms-email-row">
                         <div className="ms-email-from">{senderName || "?"}</div>
-                        <div className="ms-email-time">{fmtTime(m.receivedDateTime)}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                          {triage && <span className={`ms-triage-badge ms-triage-${triage}`}>{triage}</span>}
+                          {ruleLabel && <span className="ms-rule-label">{ruleLabel}</span>}
+                          <span className="ms-email-time">{fmtTime(m.receivedDateTime)}</span>
+                        </div>
                       </div>
                       <div className="ms-email-subject">{m.subject}</div>
                       <div className="ms-email-preview">{m.bodyPreview}</div>
@@ -1173,11 +1517,51 @@ export default function DashboardPage() {
           {/* CALENDAR WIDGET */}
           <section className="ms-panel ms-cal-panel">
             {nextEvt ? (
-              <div className="ms-next-evt ms-next-evt-highlight">
-                <div className="ms-next-evt-pill">up next · in {relTime(nextEvt.start.dateTime + "Z")}</div>
-                <div className="ms-next-evt-name">{nextEvt.subject}</div>
-                <div className="ms-next-evt-time">{fmtTime(nextEvt.start.dateTime + "Z")} – {fmtTime(nextEvt.end.dateTime + "Z")}</div>
-              </div>
+              <>
+                <div className="ms-next-evt ms-next-evt-highlight">
+                  <div className="ms-next-evt-top">
+                    <div>
+                      <div className="ms-next-evt-pill">up next · in {relTime(nextEvt.start.dateTime + "Z")}</div>
+                      <div className="ms-next-evt-name">{nextEvt.subject}</div>
+                      <div className="ms-next-evt-time">{fmtTime(nextEvt.start.dateTime + "Z")} – {fmtTime(nextEvt.end.dateTime + "Z")}</div>
+                    </div>
+                    <button
+                      className={`ms-prep-btn${prepOpenId === nextEvt.id ? " active" : ""}`}
+                      onClick={() => loadMeetingPrep(nextEvt)}
+                      disabled={prepLoading && prepOpenId === nextEvt.id}
+                      title="AI Meeting Prep">
+                      {prepLoading && prepOpenId === nextEvt.id ? <span className="ms-ai-spinner" /> : <><SparklesIcon size={12} /> Prep</>}
+                    </button>
+                  </div>
+                </div>
+                {prepOpenId === nextEvt.id && prepMap[nextEvt.id] && (() => {
+                  const p = prepMap[nextEvt.id];
+                  return (
+                    <div className="ms-prep-panel">
+                      <div className="ms-prep-summary">{p.summary}</div>
+                      {p.points?.length > 0 && (
+                        <div className="ms-prep-section">
+                          <div className="ms-prep-section-title">Talking Points</div>
+                          {p.points.map((pt, i) => <div key={i} className="ms-prep-item">· {pt}</div>)}
+                        </div>
+                      )}
+                      {p.questions?.length > 0 && (
+                        <div className="ms-prep-section">
+                          <div className="ms-prep-section-title">Questions to Raise</div>
+                          {p.questions.map((q, i) => <div key={i} className="ms-prep-item">? {q}</div>)}
+                        </div>
+                      )}
+                      {p.actions?.length > 0 && (
+                        <div className="ms-prep-section">
+                          <div className="ms-prep-section-title">Before the Meeting</div>
+                          {p.actions.map((a, i) => <div key={i} className="ms-prep-item">✓ {a}</div>)}
+                        </div>
+                      )}
+                      <button className="btn-ghost" style={{ fontSize: 11, marginTop: 6 }} onClick={() => setPrepOpenId(null)}>Close</button>
+                    </div>
+                  );
+                })()}
+              </>
             ) : (
               <div className="ms-next-evt ms-next-evt-empty">No upcoming events</div>
             )}
@@ -1329,6 +1713,29 @@ export default function DashboardPage() {
                 </div>
               )}
 
+              {/* ── EMAIL → TASK PIPELINE ── */}
+              {m && !composeNew && expandedEmail && (() => {
+                const tasks = emailTasksMap[expandedEmail];
+                if (emailTasksLoading && !tasks) {
+                  return <div className="ms-email-tasks-bar"><span className="ms-muted-small"><span className="ms-ai-spinner" style={{ display: "inline-block", marginRight: 6 }} />Extracting action items…</span></div>;
+                }
+                if (!tasks || tasks.length === 0) return null;
+                return (
+                  <div className="ms-email-tasks-bar">
+                    <span className="ms-email-tasks-label"><SparklesIcon size={12} /> Action items</span>
+                    {tasks.map((t, i) => (
+                      <button key={i} className="ms-email-task-chip"
+                        disabled={emailTaskAdding === t.title}
+                        onClick={() => addEmailTask(t, expandedEmail)}
+                        title={t.reason}>
+                        {emailTaskAdding === t.title ? <span className="ms-ai-spinner-sm" /> : "+ "}
+                        {t.title}{t.due ? ` · ${t.due}` : ""}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {/* ── COMPOSE SECTION (reply or fresh) ── */}
               {isCompose && (
                 <div className={`ms-mail-compose${composeNew ? " ms-mail-compose-full" : ""}`}>
@@ -1389,8 +1796,14 @@ export default function DashboardPage() {
                     <button className="btn-ghost" onClick={copyDraftToClipboard} disabled={!emailDraftBody.trim()}>
                       <CopyIcon size={13} /> Copy
                     </button>
-                    <button className="btn" onClick={openInOutlook} disabled={!emailDraftBody.trim() && !emailTo.length}>
-                      <SendIcon size={13} /> Open in Outlook
+                    <button className="btn-ghost" onClick={openInOutlook} disabled={!emailDraftBody.trim() && !emailTo.length}>
+                      Open in Outlook
+                    </button>
+                    <button className="btn-ghost" onClick={saveDraft} disabled={emailSavingDraft || (!emailDraftBody.trim() && !emailDraftSubject.trim())}>
+                      {emailSavingDraft ? "Saving…" : "Save Draft"}
+                    </button>
+                    <button className="btn" onClick={sendEmail} disabled={emailSending || !emailTo.length || !emailDraftBody.trim()}>
+                      <SendIcon size={13} /> {emailSending ? "Sending…" : "Send"}
                     </button>
                   </div>
                 </div>

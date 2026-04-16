@@ -1564,3 +1564,166 @@ html[data-theme="light"] .drawing-style-popover {
 }
 .ms-agent-input:focus { border-color: var(--accent); }
 
+/* ══════════ TRIAGE BADGES ══════════ */
+.ms-triage-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;
+  flex-shrink: 0;
+}
+.ms-triage-urgent  { background: rgba(239,68,68,0.15);  color: #ef4444; }
+.ms-triage-action  { background: rgba(249,115,22,0.15); color: #f97316; }
+.ms-triage-fyi     { background: rgba(99,102,241,0.15); color: #818cf8; }
+.ms-triage-newsletter { background: var(--bg-2); color: var(--text-dim); }
+
+/* ── Inbox legend ── */
+.ms-inbox-legend {
+  display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px;
+  padding: 8px 10px; margin-bottom: 6px;
+  background: var(--bg-2); border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.ms-legend-section {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+}
+.ms-legend-section-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--text-faint); margin-right: 2px;
+}
+.ms-legend-desc { font-size: 10px; color: var(--text-dim); margin-right: 4px; }
+.ms-legend-vsep { width: 1px; height: 28px; background: var(--border); flex-shrink: 0; align-self: center; }
+
+/* Row-highlight dots */
+.ms-legend-dot {
+  display: inline-block; width: 10px; height: 10px;
+  border-radius: 2px; flex-shrink: 0;
+}
+.ms-legend-dot-unread  { background: var(--accent-soft); border: 2px solid var(--accent); }
+.ms-legend-dot-mention { background: rgba(234,179,8,0.18); border: 2px solid rgba(234,179,8,0.6); }
+
+/* kept for separator reuse */
+.ms-triage-legend-sep { width: 1px; height: 12px; background: var(--border); flex-shrink: 0; }
+
+.ms-rule-label {
+  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; flex-shrink: 0;
+  background: rgba(16,185,129,0.15); color: #10b981;
+}
+
+/* ══════════ CHAT — SENT-BY-ME TREATMENT ══════════ */
+
+/* Avatar wrapper so the sent-dot can be absolutely positioned */
+.ms-chat-avatar-wrap { position: relative; flex-shrink: 0; }
+
+/* Small blue "↗" dot badge at the bottom-right of the avatar */
+.ms-chat-sent-dot {
+  position: absolute; bottom: -2px; right: -2px;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--card);
+  display: flex; align-items: center; justify-content: center;
+}
+.ms-chat-sent-dot::after {
+  content: "↗";
+  font-size: 7px; line-height: 1;
+  color: white; display: block;
+}
+
+/* "You" pill shown before the message preview */
+.ms-chat-you-pill {
+  display: inline-flex; align-items: center;
+  padding: 1px 5px; border-radius: 3px; margin-right: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 9px; font-weight: 800;
+  letter-spacing: 0.4px; text-transform: uppercase;
+  flex-shrink: 0; vertical-align: middle;
+}
+.ms-chat-you-body { color: var(--text-dim); font-size: 12px; }
+
+/* Slightly muted row when last message was sent by me — like Teams */
+.ms-chat.ms-chat-sent-last { opacity: 0.82; }
+.ms-chat.ms-chat-sent-last:hover { opacity: 1; }
+
+/* ══════════ WORKFLOW RULES PANEL ══════════ */
+.ms-rules-panel {
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  background: var(--bg-2); display: flex; flex-direction: column; gap: 10px;
+}
+.ms-rules-head { display: flex; align-items: center; justify-content: space-between; }
+.ms-rules-title { font-size: 13px; font-weight: 700; }
+.ms-rules-list { display: flex; flex-direction: column; gap: 6px; }
+.ms-rule-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 7px 10px;
+}
+.ms-rule-row.disabled { opacity: 0.45; }
+.ms-rule-toggle { background: none; border: none; cursor: pointer; font-size: 14px; color: var(--accent); padding: 0; line-height: 1; flex-shrink: 0; padding-top: 1px; }
+.ms-rule-desc { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ms-rule-name { font-size: 12px; font-weight: 600; }
+.ms-rule-cond { font-size: 11px; color: var(--text-dim); }
+.ms-rule-del { background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 16px; padding: 0; line-height: 1; flex-shrink: 0; }
+.ms-rule-del:hover { color: #ef4444; }
+.ms-rule-form { display: flex; flex-direction: column; gap: 7px; padding-top: 6px; border-top: 1px solid var(--border); }
+.ms-rule-form input, .ms-rule-form select {
+  background: var(--card); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 5px 9px; font-size: 12px; outline: none;
+}
+.ms-rule-form input:focus, .ms-rule-form select:focus { border-color: var(--accent); }
+.ms-rule-form-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ms-rule-form-label { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+.ms-rule-form-row input { flex: 1; min-width: 80px; }
+
+/* ══════════ MEETING PREP ══════════ */
+.ms-next-evt-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ms-prep-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: var(--radius); font-size: 11px; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  cursor: pointer; transition: all 0.12s; flex-shrink: 0; white-space: nowrap;
+}
+.ms-prep-btn:hover, .ms-prep-btn.active { background: var(--accent); color: white; }
+.ms-prep-btn:disabled { opacity: 0.5; cursor: default; }
+.ms-prep-panel {
+  padding: 12px 14px; background: var(--bg-2);
+  border-top: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
+  display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+}
+.ms-prep-summary { color: var(--text-dim); font-style: italic; line-height: 1.5; }
+.ms-prep-section { display: flex; flex-direction: column; gap: 3px; }
+.ms-prep-section-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--accent); margin-bottom: 2px;
+}
+.ms-prep-item { color: var(--text); line-height: 1.5; padding-left: 2px; }
+
+/* ══════════ EMAIL → TASK PIPELINE ══════════ */
+.ms-email-tasks-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  padding: 10px 20px; border-top: 1px solid var(--border);
+  background: var(--bg-2); flex-shrink: 0;
+}
+.ms-email-tasks-label {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.3px; flex-shrink: 0;
+}
+.ms-email-task-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); cursor: pointer;
+  transition: all 0.12s; white-space: nowrap;
+}
+.ms-email-task-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.ms-email-task-chip:disabled { opacity: 0.5; cursor: default; }
+
+/* Reusable small spinner */
+.ms-ai-spinner-sm {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
