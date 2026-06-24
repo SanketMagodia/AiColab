@@ -904,9 +904,17 @@ html[data-theme="light"] .drawing-style-popover {
 .ms-chat-row { display: flex; align-items: flex-start; gap: 9px; }
 .ms-chat-body { flex: 1; min-width: 0; }
 .ms-chat-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-.ms-chat-name { font-weight: 600; font-size: 13px; }
-.ms-chat-time { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+.ms-chat-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ms-chat-badge {
+  flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--bg-2); border: 1px solid var(--border); color: var(--text-faint);
+}
+.ms-chat-time { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-dim); flex-shrink: 0; margin-left: auto; }
 .ms-chat-preview { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-chat-preview strong { color: var(--text); font-weight: 600; }
+.ms-avatar-group { background: linear-gradient(135deg, var(--accent), #6366f1); }
+.ms-group-icon { font-weight: 800; font-size: 11px; }
 .ms-chat-reply {
   display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
 }
@@ -1563,4 +1571,51 @@ html[data-theme="light"] .drawing-style-popover {
   border: 1px solid var(--border); font-size: 13px; outline: none;
 }
 .ms-agent-input:focus { border-color: var(--accent); }
+
+/* ── Auto-reply ── */
+.ms-autoreply {
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--bg-2); transition: background 0.3s, border-color 0.3s;
+}
+.ms-autoreply-active {
+  background: rgba(34, 197, 94, 0.06); border-bottom-color: rgba(34, 197, 94, 0.2);
+}
+.ms-autoreply-row {
+  display: flex; align-items: center; gap: 10px; min-height: 28px;
+}
+.ms-toggle-label {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;
+  color: var(--text-dim); user-select: none;
+}
+.ms-toggle-track {
+  position: relative; width: 34px; height: 18px; border-radius: 9px;
+  background: var(--border); transition: background 0.2s;
+  flex-shrink: 0;
+}
+.ms-toggle-track[data-on="true"] {
+  background: var(--accent);
+}
+.ms-toggle-thumb {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: white; transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.ms-toggle-track[data-on="true"] .ms-toggle-thumb {
+  transform: translateX(16px);
+}
+.ms-autoreply-text { font-weight: 600; font-size: 12px; }
+.ms-autoreply-status {
+  font-size: 11px; color: var(--accent); font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.ms-autoreply-input {
+  display: flex; gap: 6px; margin-top: 6px; align-items: center;
+}
+.ms-autoreply-input input {
+  flex: 1; padding: 5px 8px; border-radius: var(--radius-sm);
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  font-size: 12px; outline: none;
+}
+.ms-autoreply-input input:focus { border-color: var(--accent); }
+.ms-autoreply-input .btn-ghost { font-size: 11px; padding: 4px 8px; }
 

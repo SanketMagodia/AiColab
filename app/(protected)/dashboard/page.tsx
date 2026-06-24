@@ -18,7 +18,7 @@ type CalEvent = { id: string; subject: string; start: { dateTime: string }; end:
 type TodoList = { id: string; displayName: string };
 type TodoTask = { id: string; title: string; status: string; dueDateTime?: { dateTime: string }; listId: string; listName: string };
 type Chat = {
-  id: string; topic?: string;
+  id: string; topic?: string; chatType?: string;
   lastMessagePreview?: { id?: string; createdDateTime?: string; body?: { content?: string }; from?: { user?: { displayName?: string; id?: string } } };
 };
 type ChatMessage = {
@@ -26,6 +26,7 @@ type ChatMessage = {
   body?: { content?: string; contentType?: string };
   from?: { user?: { displayName?: string; id?: string } };
   createdDateTime?: string;
+  messageType?: string;
 };
 type Profile = { displayName?: string; userPrincipalName?: string; mail?: string; givenName?: string };
 type GraphUser = { id: string; displayName: string; mail?: string; userPrincipalName?: string; jobTitle?: string };
@@ -109,6 +110,12 @@ export default function DashboardPage() {
   const [notifSugLoading, setNotifSugLoading] = useState(false);
   const [notifReplyText, setNotifReplyText] = useState("");
   const [notifSending, setNotifSending] = useState(false);
+
+  // Auto-reply
+  const [autoReplyOn, setAutoReplyOn] = useState(false);
+  const [autoReplyMsg, setAutoReplyMsg] = useState("");
+  const autoReplied = useRef(new Set<string>());
+  const autoReplyBusy = useRef(false);
 
   // Floating agent chatbot
   const [agentOpen, setAgentOpen] = useState(false);
@@ -249,10 +256,12 @@ export default function DashboardPage() {
     } catch (e) { setErrs(p => ({ ...p, tasks: e instanceof Error ? e.message : "Failed" })); }
   }, []);
 
+  const autoReplyQueue = useRef<Chat[]>([]);
+
   const loadChats = useCallback(async (a: AccountInfo) => {
     try {
       const d = await graphFetch<{ value: Chat[] }>(a,
-        "/me/chats?$top=20&$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc");
+        "/me/chats?$top=20&$select=id,topic,chatType&$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc");
       const cs = (d?.value ?? []).filter(c => c.lastMessagePreview);
       const myId = a.localAccountId;
       cs.forEach(c => {
@@ -265,6 +274,7 @@ export default function DashboardPage() {
             const body = strip(c.lastMessagePreview?.body?.content);
             notify("New Message", sender, body);
             setNotifPrompt({ chatId: c.id, sender, body });
+            autoReplyQueue.current.push(c);
           }
           seenChats.current.add(mid);
         }
@@ -289,6 +299,22 @@ export default function DashboardPage() {
     ];
     return () => ids.forEach(clearInterval);
   }, [account, loadProfile, refreshAll, loadEmails, loadCalendar, loadTasks, loadChats]);
+
+  // Process auto-reply queue
+  useEffect(() => {
+    if (!autoReplyOn || !account) return;
+    const iv = window.setInterval(async () => {
+      if (autoReplyBusy.current || autoReplyQueue.current.length === 0) return;
+      autoReplyBusy.current = true;
+      const batch = autoReplyQueue.current.splice(0);
+      for (const chat of batch) {
+        await handleAutoReply(chat);
+      }
+      autoReplyBusy.current = false;
+    }, 2000);
+    return () => clearInterval(iv);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReplyOn, account, autoReplyMsg, profile]);
 
   /* ── actions ── */
   async function openEmail(id: string, wasUnread: boolean) {
@@ -404,27 +430,38 @@ export default function DashboardPage() {
   }
 
   /* ── Chat window ── */
+  const [chatError, setChatError] = useState("");
+
   async function loadChatMsgs(chatId: string, showLoading = true) {
     if (!account) return;
-    if (showLoading) setChatLoading(true);
+    if (showLoading) { setChatLoading(true); setChatError(""); }
     try {
-      const d = await graphFetch<{ value: ChatMessage[] }>(account, `/me/chats/${chatId}/messages?$top=4`);
-      const msgs = (d?.value ?? []).filter(m => m.body?.content && m.from?.user).reverse();
+      const d = await graphFetch<{ value: ChatMessage[] }>(account, `/me/chats/${chatId}/messages?$top=30`);
+      const raw = d?.value ?? [];
+      const msgs = raw
+        .filter(m => m.body?.content && m.messageType !== "systemEventMessage")
+        .reverse();
       setChatMessages(msgs);
-    } catch { /* noop */ }
-    finally { if (showLoading) setChatLoading(false); }
+    } catch (e) {
+      console.error("loadChatMsgs error:", e);
+      setChatError(e instanceof Error ? e.message : "Failed to load messages");
+      setChatMessages([]);
+    } finally { if (showLoading) setChatLoading(false); }
   }
 
   function openChatFromList(chat: Chat) {
-    const sender = chat.lastMessagePreview?.from?.user?.displayName || chat.topic || "Chat";
+    const isGroup = chat.chatType === "group" || chat.chatType === "meeting";
+    const name = isGroup
+      ? (chat.topic || "Group chat")
+      : (chat.lastMessagePreview?.from?.user?.displayName || chat.topic || "Chat");
     setChatWindowId(chat.id);
-    setChatWindowUser(sender);
+    setChatWindowUser(name);
     setChatView("chat");
     setChatMsgText("");
     setSuggestedReplies([]);
     loadChatMsgs(chat.id);
     const body = strip(chat.lastMessagePreview?.body?.content);
-    if (body && sender) fetchSuggestions(body, sender);
+    if (body && name) fetchSuggestions(body, name);
   }
 
   async function openDmChat(user: GraphUser) {
@@ -477,9 +514,68 @@ export default function DashboardPage() {
     setChatView("list");
     setChatWindowId(null);
     setChatWindowUser("");
+    setChatError("");
     setChatMessages([]);
     setSuggestedReplies([]);
     setChatMsgText("");
+  }
+
+  /* ── Auto-reply to personal messages ── */
+  async function handleAutoReply(chat: Chat) {
+    if (!account || !autoReplyOn || !autoReplyMsg.trim()) return;
+    if (chat.chatType === "group" || chat.chatType === "meeting") return;
+
+    const msgId = chat.lastMessagePreview?.id || chat.id;
+    if (autoReplied.current.has(msgId)) return;
+
+    const fromId = chat.lastMessagePreview?.from?.user?.id;
+    if (fromId === account.localAccountId) return;
+
+    autoReplied.current.add(msgId);
+
+    const senderName = chat.lastMessagePreview?.from?.user?.displayName || "someone";
+    const incomingBody = strip(chat.lastMessagePreview?.body?.content);
+    if (!incomingBody) return;
+
+    try {
+      let chatHistory: Array<{ from: string; text: string }> = [];
+      try {
+        const hist = await graphFetch<{ value: ChatMessage[] }>(account, `/me/chats/${chat.id}/messages?$top=8`);
+        chatHistory = (hist?.value ?? [])
+          .filter(m => m.body?.content && m.messageType !== "systemEventMessage")
+          .reverse()
+          .map(m => ({
+            from: m.from?.user?.id === account.localAccountId
+              ? (profile?.givenName || profile?.displayName || "Me")
+              : (m.from?.user?.displayName || "Them"),
+            text: strip(m.body?.content),
+          }));
+      } catch { /* proceed without history */ }
+
+      const resp = await fetch("/api/ai/auto-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: profile?.givenName || profile?.displayName || "the user",
+          statusMessage: autoReplyMsg,
+          incomingMessage: incomingBody,
+          senderName,
+          chatHistory,
+        }),
+      });
+
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (!data.reply) return;
+
+      await graphFetch(account, `/me/chats/${chat.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body: { contentType: "text", content: data.reply } }),
+      });
+      console.log(`[auto-reply] → ${senderName}: ${data.reply}`);
+    } catch (e) {
+      console.error("[auto-reply] failed:", e);
+    }
   }
 
   /* ── Smart reply suggestions ── */
@@ -1038,18 +1134,25 @@ export default function DashboardPage() {
                     </div>
                     <div className="ms-chat-window-messages">
                       {chatLoading && <div className="ms-muted-small" style={{ textAlign: "center", padding: 20 }}>Loading messages…</div>}
-                      {!chatLoading && chatMessages.length === 0 && (
+                      {!chatLoading && chatError && (
+                        <div className="ms-err" style={{ textAlign: "center", padding: 20 }}>
+                          {chatError}
+                          <button className="btn-ghost" style={{ marginLeft: 8 }} onClick={() => chatWindowId && loadChatMsgs(chatWindowId)}>Retry</button>
+                        </div>
+                      )}
+                      {!chatLoading && !chatError && chatMessages.length === 0 && (
                         <div className="ms-muted-small" style={{ textAlign: "center", padding: 40 }}>No messages yet. Say hi!</div>
                       )}
                       {chatMessages.map(m => {
                         const self = m.from?.user?.id === myId;
+                        const senderName = m.from?.user?.displayName || "Unknown";
                         const bodyText = strip(m.body?.content);
                         if (!bodyText) return null;
                         return (
                           <div key={m.id} className={`ms-msg${self ? " self" : ""}`}>
-                            {!self && <div className="ms-avatar ms-avatar-sm ms-msg-avatar">{ini(m.from?.user?.displayName)}</div>}
+                            {!self && <div className="ms-avatar ms-avatar-sm ms-msg-avatar">{ini(senderName)}</div>}
                             <div className="ms-msg-content">
-                              {!self && <div className="ms-msg-name">{m.from?.user?.displayName}</div>}
+                              {!self && <div className="ms-msg-name">{senderName}</div>}
                               <div className="ms-msg-bubble">{bodyText}</div>
                               <div className={`ms-msg-time${self ? " self" : ""}`}>{fmtTime(m.createdDateTime)}</div>
                             </div>
@@ -1106,30 +1209,69 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     )}
+                    {/* Rocky auto-reply control */}
+                    <div className={`ms-autoreply${autoReplyOn ? " ms-autoreply-active" : ""}`}>
+                      <div className="ms-autoreply-row">
+                        <label className="ms-toggle-label">
+                          <span className="ms-toggle-track" data-on={autoReplyOn} onClick={() => {
+                            if (autoReplyOn) { setAutoReplyOn(false); }
+                            else if (autoReplyMsg.trim()) { setAutoReplyOn(true); }
+                          }}>
+                            <span className="ms-toggle-thumb" />
+                          </span>
+                          <span className="ms-autoreply-text">
+                            {autoReplyOn ? "🐾 Rocky is on duty" : "🐕 Let Rocky handle it"}
+                          </span>
+                        </label>
+                        {autoReplyOn && <span className="ms-autoreply-status">{autoReplyMsg}</span>}
+                      </div>
+                      {!autoReplyOn && (
+                        <div className="ms-autoreply-input">
+                          <input
+                            placeholder="Tell Rocky why you're away (e.g. going for lunch)…"
+                            value={autoReplyMsg}
+                            onChange={e => setAutoReplyMsg(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter" && autoReplyMsg.trim()) setAutoReplyOn(true); }}
+                          />
+                          <button
+                            className="btn-ghost"
+                            disabled={!autoReplyMsg.trim()}
+                            onClick={() => setAutoReplyOn(true)}>
+                            Unleash
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="ms-panel-body ms-scroll-body">
                       {errs.chat ? <div className="ms-err">{errs.chat}</div>
                       : (() => {
-                        const inbound = chats.filter(c => {
-                          const fromId = c.lastMessagePreview?.from?.user?.id;
-                          return !fromId || fromId !== myId;
-                        });
-                        if (inbound.length === 0) return <Empty text="No recent chats" />;
-                        return inbound.map(c => {
+                        if (chats.length === 0) return <Empty text="No recent chats" />;
+                        return chats.map(c => {
                           const p = c.lastMessagePreview!;
-                          const sender = p.from?.user?.displayName || c.topic || "Chat";
+                          const isGroup = c.chatType === "group" || c.chatType === "meeting";
+                          const chatName = isGroup
+                            ? (c.topic || "Group chat")
+                            : (p.from?.user?.displayName || c.topic || "Chat");
+                          const msgSender = p.from?.user?.displayName || "";
                           const body = strip(p.body?.content);
-                          const hi = isHL(body, sender) || isHL(c.topic, sender);
+                          const hi = isHL(body, chatName) || isHL(c.topic, chatName);
                           return (
                             <div key={c.id} className={`ms-chat${hi ? " mention" : ""}`}
                               onClick={() => openChatFromList(c)}>
                               <div className="ms-chat-row">
-                                <div className="ms-avatar ms-avatar-sm">{ini(sender)}</div>
+                                <div className={`ms-avatar ms-avatar-sm${isGroup ? " ms-avatar-group" : ""}`}>
+                                  {isGroup ? <span className="ms-group-icon">G</span> : ini(chatName)}
+                                </div>
                                 <div className="ms-chat-body">
                                   <div className="ms-chat-meta">
-                                    <span className="ms-chat-name">{sender}</span>
+                                    <span className="ms-chat-name">{chatName}</span>
+                                    {isGroup && <span className="ms-chat-badge">group</span>}
                                     <span className="ms-chat-time">{fmtTime(p.createdDateTime)}</span>
                                   </div>
-                                  <div className="ms-chat-preview">{body}</div>
+                                  <div className="ms-chat-preview">
+                                    {isGroup && msgSender && <strong>{msgSender}: </strong>}{body}
+                                  </div>
                                 </div>
                               </div>
                             </div>
