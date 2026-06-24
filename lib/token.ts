@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 
 export const COOKIE_NAME = "aicolab_token";
-export const COOKIE_MAX_AGE = 8 * 60 * 60; // 8 hours in seconds
+export const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days in seconds
 
 function secret(): Uint8Array {
   const key = process.env.JWT_SECRET;
@@ -13,7 +13,7 @@ export async function signToken(): Promise<string> {
   return new SignJWT({ v: 1 })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("8h")
+    .setExpirationTime("7d")
     .sign(secret());
 }
 
