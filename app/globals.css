@@ -1572,7 +1572,6 @@ html[data-theme="light"] .drawing-style-popover {
 }
 .ms-agent-input:focus { border-color: var(--accent); }
 
-<<<<<<< HEAD
 /* ── Auto-reply ── */
 .ms-autoreply {
   padding: 8px 12px; border-bottom: 1px solid var(--border);
@@ -1619,7 +1618,7 @@ html[data-theme="light"] .drawing-style-popover {
 }
 .ms-autoreply-input input:focus { border-color: var(--accent); }
 .ms-autoreply-input .btn-ghost { font-size: 11px; padding: 4px 8px; }
-=======
+
 /* ══════════ TRIAGE BADGES ══════════ */
 .ms-triage-badge {
   display: inline-block; padding: 1px 6px; border-radius: 999px;
@@ -1782,5 +1781,4 @@ html[data-theme="light"] .drawing-style-popover {
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
->>>>>>> 30db283c77f0eb1995f92520f567ab62036cf93a
 

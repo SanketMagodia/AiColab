@@ -19,12 +19,8 @@ type TodoList = { id: string; displayName: string };
 type TodoTask = { id: string; title: string; status: string; dueDateTime?: { dateTime: string }; listId: string; listName: string };
 type ChatMember = { id: string; displayName?: string; userId?: string };
 type Chat = {
-<<<<<<< HEAD
   id: string; topic?: string; chatType?: string;
-=======
-  id: string; topic?: string;
   members?: ChatMember[];
->>>>>>> 30db283c77f0eb1995f92520f567ab62036cf93a
   lastMessagePreview?: { id?: string; createdDateTime?: string; body?: { content?: string }; from?: { user?: { displayName?: string; id?: string } } };
 };
 type ChatMessage = {
@@ -359,11 +355,7 @@ export default function DashboardPage() {
   const loadChats = useCallback(async (a: AccountInfo) => {
     try {
       const d = await graphFetch<{ value: Chat[] }>(a,
-<<<<<<< HEAD
-        "/me/chats?$top=20&$select=id,topic,chatType&$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc");
-=======
-        "/me/chats?$top=20&$expand=lastMessagePreview,members&$orderby=lastMessagePreview/createdDateTime desc");
->>>>>>> 30db283c77f0eb1995f92520f567ab62036cf93a
+        "/me/chats?$top=20&$select=id,topic,chatType&$expand=lastMessagePreview,members&$orderby=lastMessagePreview/createdDateTime desc");
       const cs = (d?.value ?? []).filter(c => c.lastMessagePreview);
       const myId = a.localAccountId;
       cs.forEach(c => {
@@ -570,14 +562,10 @@ export default function DashboardPage() {
   }
 
   function openChatFromList(chat: Chat) {
-<<<<<<< HEAD
     const isGroup = chat.chatType === "group" || chat.chatType === "meeting";
     const name = isGroup
       ? (chat.topic || "Group chat")
-      : (chat.lastMessagePreview?.from?.user?.displayName || chat.topic || "Chat");
-=======
-    const sender = chatContactNames.current[chat.id] || chat.topic || chat.lastMessagePreview?.from?.user?.displayName || "Chat";
->>>>>>> 30db283c77f0eb1995f92520f567ab62036cf93a
+      : (chatContactNames.current[chat.id] || chat.lastMessagePreview?.from?.user?.displayName || chat.topic || "Chat");
     setChatWindowId(chat.id);
     setChatWindowUser(name);
     setChatView("chat");
@@ -1521,28 +1509,24 @@ export default function DashboardPage() {
                         if (chats.length === 0) return <Empty text="No recent chats" />;
                         return chats.map(c => {
                           const p = c.lastMessagePreview!;
-<<<<<<< HEAD
                           const isGroup = c.chatType === "group" || c.chatType === "meeting";
+                          const lastFromId = p.from?.user?.id;
+                          const sentByMe = !!(lastFromId && myId && lastFromId === myId);
                           const chatName = isGroup
                             ? (c.topic || "Group chat")
-                            : (p.from?.user?.displayName || c.topic || "Chat");
+                            : (chatContactNames.current[c.id] || p.from?.user?.displayName || c.topic || "Chat");
                           const msgSender = p.from?.user?.displayName || "";
                           const body = strip(p.body?.content);
                           const hi = isHL(body, chatName) || isHL(c.topic, chatName);
-=======
-                          const lastFromId = p.from?.user?.id;
-                          const sentByMe = !!(lastFromId && myId && lastFromId === myId);
-                          const contactName = chatContactNames.current[c.id] || c.topic || p.from?.user?.displayName || "Chat";
-                          const body = strip(p.body?.content);
-                          const hi = !sentByMe && (isHL(body, contactName) || isHL(c.topic, contactName));
->>>>>>> 30db283c77f0eb1995f92520f567ab62036cf93a
                           return (
                             <div key={c.id} className={`ms-chat${hi ? " mention" : ""}${sentByMe ? " ms-chat-sent-last" : ""}`}
                               onClick={() => openChatFromList(c)}>
                               <div className="ms-chat-row">
-<<<<<<< HEAD
-                                <div className={`ms-avatar ms-avatar-sm${isGroup ? " ms-avatar-group" : ""}`}>
-                                  {isGroup ? <span className="ms-group-icon">G</span> : ini(chatName)}
+                                <div className="ms-chat-avatar-wrap">
+                                  <div className={`ms-avatar ms-avatar-sm${isGroup ? " ms-avatar-group" : ""}`}>
+                                    {isGroup ? <span className="ms-group-icon">G</span> : ini(chatName)}
+                                  </div>
+                                  {sentByMe && !isGroup && <span className="ms-chat-sent-dot" title="You sent the last message" />}
                                 </div>
                                 <div className="ms-chat-body">
                                   <div className="ms-chat-meta">
@@ -1551,23 +1535,9 @@ export default function DashboardPage() {
                                     <span className="ms-chat-time">{fmtTime(p.createdDateTime)}</span>
                                   </div>
                                   <div className="ms-chat-preview">
-                                    {isGroup && msgSender && <strong>{msgSender}: </strong>}{body}
-=======
-                                {/* Avatar always shows contact's initials; badge when you sent last */}
-                                <div className="ms-chat-avatar-wrap">
-                                  <div className="ms-avatar ms-avatar-sm">{ini(contactName)}</div>
-                                  {sentByMe && <span className="ms-chat-sent-dot" title="You sent the last message" />}
-                                </div>
-                                <div className="ms-chat-body">
-                                  <div className="ms-chat-meta">
-                                    <span className="ms-chat-name">{contactName}</span>
-                                    <span className="ms-chat-time">{fmtTime(p.createdDateTime)}</span>
-                                  </div>
-                                  <div className="ms-chat-preview">
-                                    {sentByMe
+                                    {sentByMe && !isGroup
                                       ? <><span className="ms-chat-you-pill">You</span><span className="ms-chat-you-body">{body}</span></>
-                                      : body}
->>>>>>> 30db283c77f0eb1995f92520f567ab62036cf93a
+                                      : <>{isGroup && msgSender && <strong>{msgSender}: </strong>}{body}</>}
                                   </div>
                                 </div>
                               </div>
