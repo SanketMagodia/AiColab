@@ -88,7 +88,7 @@ NEXT_PUBLIC_MS_TENANT_ID=<your tenant id>
 
 # Groq
 GROQ_API_KEY=<your groq key>
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=groq/compound
 
 # Session
 JWT_SECRET=<any long random string>

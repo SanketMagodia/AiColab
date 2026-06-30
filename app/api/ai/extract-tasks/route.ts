@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const GROQ_KEY = process.env.GROQ_API_KEY ?? "";
-const GROQ_MODEL = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
+const GROQ_MODEL = process.env.GROQ_MODEL ?? "groq/compound";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const SYSTEM_PROMPT = `You are an assistant that extracts actionable tasks from emails.
