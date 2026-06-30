@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const GROQ_KEY = process.env.GROQ_API_KEY ?? "";
-const GROQ_MODEL = process.env.GROQ_MODEL ?? "groq/compound";
+const GROQ_MODEL = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const SYSTEM_PROMPT = `You generate exactly 3 short reply suggestions for a Teams chat message. Keep each reply concise (1-2 sentences max). Make them contextually appropriate and varied:

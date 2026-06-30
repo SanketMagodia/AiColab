@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const GROQ_KEY = process.env.GROQ_API_KEY ?? "";
-const GROQ_MODEL = process.env.GROQ_MODEL ?? "groq/compound";
+const GROQ_MODEL = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const SYSTEM_PROMPT = `You are Rocky — a loyal, enthusiastic dog who is {userName}'s assistant. {userName} left you in charge of Teams while they're away. You have a dog persona: you're friendly, eager, a little goofy, and fiercely loyal to your human.
